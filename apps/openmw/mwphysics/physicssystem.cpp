@@ -740,6 +740,27 @@ namespace MWPhysics
         const float mass = static_cast<float>(1.0 / held->getRigidBody()->getInvMass());
         const float speed = std::clamp(1200.f * std::sqrt(2.f / mass), 250.f, 1200.f);
         mTaskScheduler->releaseHeldObject(Misc::Convert::toBullet(direction * speed));
+
+        // Only the player carries things, so the player threw it.
+        const Actor* thrower = getActor(MWMechanics::getPlayer());
+        mTaskScheduler->addFlyingObject(held, thrower != nullptr ? thrower->getCollisionObject() : nullptr);
+    }
+
+    std::vector<ThrownObjectHit> PhysicsSystem::takeThrownObjectHits()
+    {
+        std::vector<ThrownObjectHit> result;
+        for (const PhysicsTaskScheduler::FlyingObjectHit& hit : mTaskScheduler->takeFlyingObjectHits())
+        {
+            const std::shared_ptr<Object> object = hit.mObject.lock();
+            if (object == nullptr)
+                continue;
+            const auto victim = std::find_if(mActors.begin(), mActors.end(),
+                [&](const auto& actor) { return actor.second->getCollisionObject() == hit.mActor; });
+            if (victim == mActors.end())
+                continue;
+            result.push_back({ victim->second->getPtr(), object->getPtr(), static_cast<float>(hit.mSpeed) });
+        }
+        return result;
     }
 
     bool PhysicsSystem::isHoldingObject() const

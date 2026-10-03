@@ -1448,6 +1448,19 @@ namespace MWWorld
         mProjectileManager->processHits();
         mDiscardMovements = false;
         mPhysics->moveActors();
+
+        // Hitting someone with a thrown object is an attack, like any other.
+        for (const MWPhysics::ThrownObjectHit& hit : mPhysics->takeThrownObjectHits())
+        {
+            const MWWorld::Ptr& victim = hit.mVictim;
+            if (!victim.getClass().isActor() || victim.getClass().getCreatureStats(victim).isDead())
+                continue;
+            // A knock, not a wound: some fatigue damage by the object's momentum.
+            const float mass = std::clamp(hit.mObject.getClass().getWeight(hit.mObject), 0.2f, 50.f);
+            const float fatigue = std::clamp(mass * hit.mSpeed / 300.f, 1.f, 15.f);
+            victim.getClass().onHit(victim, { { "fatigue", fatigue } }, hit.mObject.getCellRef().getRefId(),
+                getPlayerPtr(), true, MWMechanics::DamageSourceType::Ranged);
+        }
     }
 
     void World::updateNavigator()

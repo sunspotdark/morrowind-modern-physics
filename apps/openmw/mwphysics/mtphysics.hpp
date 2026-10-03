@@ -88,6 +88,17 @@ namespace MWPhysics
             btVector3 mSource; // where the blow came from
         };
         void strikeObjects(const std::vector<Strike>& strikes);
+
+        /// Watch a thrown object for hitting an actor (other than the thrower) while it flies.
+        void addFlyingObject(const std::shared_ptr<Object>& object, const btCollisionObject* thrower);
+        struct FlyingObjectHit
+        {
+            std::weak_ptr<Object> mObject;
+            const btCollisionObject* mActor;
+            btScalar mSpeed;
+        };
+        /// Hits since the last call.
+        std::vector<FlyingObjectHit> takeFlyingObjectHits();
         void removeCollisionObject(btCollisionObject* collisionObject);
         void updateSingleAabb(const std::shared_ptr<PtrHolder>& ptr, bool immediate = false);
         bool getLineOfSight(const std::shared_ptr<Actor>& actor1, const std::shared_ptr<Actor>& actor2);
@@ -116,6 +127,12 @@ namespace MWPhysics
         void releaseHeldObjectUnsafe(btRigidBody& body, const std::optional<btVector3>& velocity);
         void freeWedgedObjectUnsafe(const std::shared_ptr<Object>& object);
         void updateWedgedObjects(const std::vector<std::shared_ptr<Object>>& objects);
+        struct FlyingObject
+        {
+            std::weak_ptr<Object> mObject;
+            const btCollisionObject* mThrower;
+        };
+        void updateFlyingObjects(const std::vector<std::pair<std::shared_ptr<Object>, FlyingObject>>& objects);
         void syncWithMainThread();
         void waitForWorkers();
         void prepareWork(float& timeAccum, std::vector<Simulation>& simulations, osg::Timer_t frameStart,
@@ -136,6 +153,10 @@ namespace MWPhysics
         // Dynamic objects passing through statics they were wedged in (see freeWedgedObjectUnsafe).
         std::vector<std::weak_ptr<Object>> mWedgedObjects;
         std::mutex mWedgedObjectsMutex;
+        // Thrown objects still flying, and the actors they hit (see addFlyingObject).
+        std::vector<FlyingObject> mFlyingObjects;
+        std::vector<FlyingObjectHit> mFlyingObjectHits;
+        std::mutex mFlyingObjectsMutex;
         mutable std::mutex mHeldObjectMutex;
         MWRender::DebugDrawer* mDebugDrawer;
         std::vector<LOSRequest> mLOSCache;

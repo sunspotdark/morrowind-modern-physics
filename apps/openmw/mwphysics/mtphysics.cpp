@@ -213,6 +213,41 @@ namespace
         btScalar mMinDepth;
     };
 
+    // Finds an actor (other than the thrower) a thrown body is touching, and the contact normal towards the body.
+    class ActorHitCallback final : public btCollisionWorld::ContactResultCallback
+    {
+    public:
+        ActorHitCallback(const btCollisionObject* body, const btCollisionObject* thrower)
+            : mBody(body)
+            , mThrower(thrower)
+        {
+            // Actors don't collide with simulated objects, so pose as an actor to get past their filter.
+            m_collisionFilterGroup = MWPhysics::CollisionType_Actor;
+            m_collisionFilterMask = MWPhysics::CollisionType_Actor;
+        }
+
+        btScalar addSingleResult(btManifoldPoint& cp, const btCollisionObjectWrapper* col0Wrap, int /*partId0*/,
+            int /*index0*/, const btCollisionObjectWrapper* col1Wrap, int /*partId1*/, int /*index1*/) override
+        {
+            // m_normalWorldOnB points from B towards A.
+            const bool bodyIsA = col0Wrap->getCollisionObject() == mBody;
+            const btCollisionObject* other = bodyIsA ? col1Wrap->getCollisionObject() : col0Wrap->getCollisionObject();
+            if (mActor == nullptr && other != mThrower && cp.getDistance() < 0)
+            {
+                mActor = other;
+                mNormal = bodyIsA ? cp.m_normalWorldOnB : -cp.m_normalWorldOnB;
+            }
+            return 0;
+        }
+
+        const btCollisionObject* mActor = nullptr;
+        btVector3 mNormal{ 0, 0, 1 };
+
+    private:
+        const btCollisionObject* mBody;
+        const btCollisionObject* mThrower;
+    };
+
     // Finds a piece of furniture (a detailed furniture collision object) a body is resting on or in.
     class FurnitureContactCallback final : public btCollisionWorld::ContactResultCallback
     {
@@ -1066,6 +1101,13 @@ namespace MWPhysics
                 if (std::shared_ptr<Object> locked = object.lock())
                     wedged.push_back(std::move(locked));
         }
+        std::vector<std::pair<std::shared_ptr<Object>, FlyingObject>> flying;
+        {
+            std::lock_guard flyingLock(mFlyingObjectsMutex);
+            for (const FlyingObject& object : mFlyingObjects)
+                if (std::shared_ptr<Object> locked = object.mObject.lock())
+                    flying.emplace_back(std::move(locked), object);
+        }
 
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
 
@@ -1109,6 +1151,69 @@ namespace MWPhysics
 
         // We are already called once per fixed physics step, so no substepping.
         mDynamicsWorld->stepSimulation(mPhysicsDt, 0);
+
+        updateFlyingObjects(flying);
+    }
+
+    void PhysicsTaskScheduler::addFlyingObject(const std::shared_ptr<Object>& object, const btCollisionObject* thrower)
+    {
+        std::lock_guard flyingLock(mFlyingObjectsMutex);
+        mFlyingObjects.push_back({ object, thrower });
+    }
+
+    std::vector<PhysicsTaskScheduler::FlyingObjectHit> PhysicsTaskScheduler::takeFlyingObjectHits()
+    {
+        std::lock_guard flyingLock(mFlyingObjectsMutex);
+        return std::exchange(mFlyingObjectHits, {});
+    }
+
+    void PhysicsTaskScheduler::updateFlyingObjects(
+        const std::vector<std::pair<std::shared_ptr<Object>, FlyingObject>>& objects)
+    {
+        // Called with the collision world locked; the caller keeps the objects alive until it is unlocked.
+        if (objects.empty())
+            return;
+
+        std::vector<const Object*> landed;
+        std::vector<FlyingObjectHit> hits;
+        for (const auto& [object, flying] : objects)
+        {
+            btRigidBody& body = *object->getRigidBody();
+            const btScalar speed = body.getLinearVelocity().length();
+            // Once it has slowed down it is just lying or rolling around, not a projectile any more.
+            constexpr btScalar minHitSpeed = 150.f;
+            if (speed < minHitSpeed)
+            {
+                landed.push_back(object.get());
+                continue;
+            }
+
+            ActorHitCallback actorHit(&body, flying.mThrower);
+            ContactTestWrapper::contactTest(mCollisionWorld, &body, actorHit);
+            if (actorHit.mActor == nullptr)
+                continue;
+
+            // Actors aren't solid to simulated objects, so bounce it off by hand.
+            const btVector3 velocity = body.getLinearVelocity();
+            const btScalar into = velocity.dot(actorHit.mNormal);
+            if (into < 0)
+                body.setLinearVelocity((velocity - actorHit.mNormal * (into * 1.4f)) * 0.6f);
+            hits.push_back({ object, actorHit.mActor, speed });
+            landed.push_back(object.get()); // one hit per throw
+        }
+
+        std::lock_guard flyingLock(mFlyingObjectsMutex);
+        // Note: no weak_ptr::lock() while the collision world is locked (see stepDynamics).
+        std::erase_if(mFlyingObjects, [&](const FlyingObject& flying) {
+            if (flying.mObject.expired())
+                return true;
+            return std::any_of(landed.begin(), landed.end(), [&](const Object* object) {
+                const auto found = std::find_if(objects.begin(), objects.end(),
+                    [&](const auto& pair) { return pair.first.get() == object; });
+                return !flying.mObject.owner_before(found->first) && !found->first.owner_before(flying.mObject);
+            });
+        });
+        mFlyingObjectHits.insert(mFlyingObjectHits.end(), hits.begin(), hits.end());
     }
 
     void PhysicsTaskScheduler::holdObject(const std::shared_ptr<Object>& object)

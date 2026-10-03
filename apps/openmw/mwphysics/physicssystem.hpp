@@ -74,6 +74,13 @@ namespace MWPhysics
 
     using ActorMap = std::unordered_map<const MWWorld::LiveCellRefBase*, std::shared_ptr<Actor>>;
 
+    struct ThrownObjectHit
+    {
+        MWWorld::Ptr mVictim;
+        MWWorld::Ptr mObject;
+        float mSpeed;
+    };
+
     /// Inverse of Misc::Convert::makeOsgQuat: the ESM rotation (x, y, z) of an object with this orientation.
     osg::Vec3f quatToEsmRotation(const osg::Quat& quat);
 
@@ -200,6 +207,9 @@ namespace MWPhysics
             const osg::Vec3f& source);
         /// Push simulated objects away from center, up to speed at the center and nothing at radius.
         void explode(const osg::Vec3f& center, float radius, float speed);
+
+        /// Actors hit by objects the player threw, since the last call.
+        std::vector<ThrownObjectHit> takeThrownObjectHits();
         void addActor(const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh);
 
         int addProjectile(
