@@ -7,6 +7,8 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
+#include <string>
 #include <span>
 #include <unordered_map>
 #include <variant>
@@ -15,6 +17,8 @@
 #include <osg/Quat>
 #include <osg/Timer>
 #include <osg/ref_ptr>
+
+#include <LinearMath/btVector3.h>
 
 #include <components/vfs/pathutil.hpp>
 
@@ -37,6 +41,7 @@ namespace MWRender
 
 namespace Resource
 {
+    struct BulletShape;
     class BulletShapeManager;
     class ResourceSystem;
 }
@@ -306,6 +311,8 @@ namespace MWPhysics
 
         void moveDynamicObjects();
         void placeOnSurface(Object& object);
+        /// Simplified convex hull of a mesh's collision geometry, computed once per mesh.
+        const std::vector<btVector3>& getHullPoints(VFS::Path::NormalizedView mesh, const Resource::BulletShape& shape);
 
         std::unique_ptr<btOverlapFilterCallback> mOverlapFilter;
         std::unique_ptr<btBroadphaseInterface> mBroadphase;
@@ -324,6 +331,8 @@ namespace MWPhysics
 
         std::vector<std::shared_ptr<Object>> mDynamicObjects; // subset of mObjects
         bool mMovingDynamicObjects = false;
+        std::unordered_map<std::string, std::vector<btVector3>> mHullCache;
+        std::set<std::string, std::less<>> mWarnedNoShape;
 
         std::map<Object*, bool> mAnimatedObjects; // stores pointers to elements in mObjects
 

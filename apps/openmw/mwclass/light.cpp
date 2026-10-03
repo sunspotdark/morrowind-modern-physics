@@ -61,9 +61,10 @@ namespace MWClass
     void Light::insertObjectPhysics(const MWWorld::Ptr& ptr, const std::string& model, const osg::Quat& rotation,
         MWPhysics::PhysicsSystem& physics) const
     {
-        // TODO: add option somewhere to enable collision for placeable objects
         if ((ptr.get<ESM::Light>()->mBase->mData.mFlags & ESM::Light::Carry) == 0)
             physics.addObject(ptr, VFS::Path::toNormalized(model), rotation, MWPhysics::CollisionType_World);
+        else // carryable, so an item: simulated
+            MWWorld::Class::insertObjectPhysics(ptr, model, rotation, physics);
     }
 
     bool Light::useAnim() const

@@ -12,7 +12,13 @@
 #include <BulletCollision/CollisionDispatch/btCollisionObject.h>
 #include <BulletCollision/CollisionDispatch/btCollisionWorld.h>
 #include <BulletCollision/CollisionDispatch/btDefaultCollisionConfiguration.h>
+#include <BulletCollision/CollisionShapes/btCompoundShape.h>
+#include <BulletCollision/CollisionShapes/btConcaveShape.h>
 #include <BulletCollision/CollisionShapes/btConeShape.h>
+#include <BulletCollision/CollisionShapes/btConvexHullShape.h>
+#include <BulletCollision/CollisionShapes/btPolyhedralConvexShape.h>
+#include <BulletCollision/CollisionShapes/btShapeHull.h>
+#include <BulletCollision/CollisionShapes/btTriangleCallback.h>
 #include <BulletCollision/CollisionShapes/btSphereShape.h>
 #include <BulletCollision/CollisionShapes/btStaticPlaneShape.h>
 #include <BulletDynamics/ConstraintSolver/btSequentialImpulseConstraintSolver.h>
@@ -29,6 +35,7 @@
 #include <components/misc/convert.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <components/misc/strings/conversion.hpp>
+#include <components/resource/bulletshape.hpp>
 #include <components/resource/bulletshapemanager.hpp>
 #include <components/resource/resourcesystem.hpp>
 #include <components/settings/values.hpp>
@@ -124,6 +131,62 @@ namespace
             }
         }
     };
+
+    struct VertexCollector final : public btTriangleCallback
+    {
+        const btTransform& mTransform;
+        std::vector<btVector3>& mOut;
+
+        VertexCollector(const btTransform& transform, std::vector<btVector3>& out)
+            : mTransform(transform)
+            , mOut(out)
+        {
+        }
+
+        void processTriangle(btVector3* triangle, int /*partId*/, int /*triangleIndex*/) override
+        {
+            for (int i = 0; i < 3; ++i)
+                mOut.push_back(mTransform(triangle[i]));
+        }
+    };
+
+    // Collect the vertices of a (possibly compound, possibly triangle mesh) shape, transformed by transform.
+    void collectVertices(const btCollisionShape& shape, const btTransform& transform, std::vector<btVector3>& out)
+    {
+        if (shape.isCompound())
+        {
+            const auto& compound = static_cast<const btCompoundShape&>(shape);
+            for (int i = 0; i < compound.getNumChildShapes(); ++i)
+                collectVertices(
+                    *compound.getChildShape(i), transform * compound.getChildTransform(i), out);
+        }
+        else if (shape.isConcave())
+        {
+            VertexCollector collector(transform, out);
+            const btVector3 everywhere(1e6, 1e6, 1e6);
+            static_cast<const btConcaveShape&>(shape).processAllTriangles(&collector, -everywhere, everywhere);
+        }
+        else if (shape.isPolyhedral())
+        {
+            const auto& polyhedron = static_cast<const btPolyhedralConvexShape&>(shape);
+            for (int i = 0; i < polyhedron.getNumVertices(); ++i)
+            {
+                btVector3 vertex;
+                polyhedron.getVertex(i, vertex);
+                out.push_back(transform(vertex));
+            }
+        }
+        else
+        {
+            btVector3 aabbMin;
+            btVector3 aabbMax;
+            shape.getAabb(transform, aabbMin, aabbMax);
+            for (int i = 0; i < 8; ++i)
+                out.emplace_back(
+                    (i & 1) ? aabbMax.x() : aabbMin.x(), (i & 2) ? aabbMax.y() : aabbMin.y(),
+                    (i & 4) ? aabbMax.z() : aabbMin.z());
+        }
+    }
 
     // Inverse of Misc::Convert::makeOsgQuat: returns the ESM rotation (x, y, z) that produces the given quaternion.
     // makeOsgQuat(rot) is the rotation Rx(-x) * Ry(-y) * Rz(-z) (applied right to left).
@@ -503,6 +566,28 @@ namespace MWPhysics
             mAnimatedObjects.emplace(obj.get(), false);
     }
 
+    const std::vector<btVector3>& PhysicsSystem::getHullPoints(
+        VFS::Path::NormalizedView mesh, const Resource::BulletShape& shape)
+    {
+        const std::string key(mesh.value());
+        if (const auto found = mHullCache.find(key); found != mHullCache.end())
+            return found->second;
+
+        std::vector<btVector3> vertices;
+        collectVertices(*shape.mCollisionShape, btTransform::getIdentity(), vertices);
+        std::vector<btVector3>& hull = mHullCache[key];
+        if (vertices.size() >= 4)
+        {
+            // Reduce the (possibly thousands of) mesh vertices to a small hull that is cheap to simulate.
+            const btConvexHullShape allPoints(
+                vertices.front().m_floats, static_cast<int>(vertices.size()), sizeof(btVector3));
+            btShapeHull shapeHull(&allPoints);
+            if (shapeHull.buildHull(allPoints.getMargin()))
+                hull.assign(shapeHull.getVertexPointer(), shapeHull.getVertexPointer() + shapeHull.numVertices());
+        }
+        return hull;
+    }
+
     void PhysicsSystem::addDynamicObject(
         const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation, float mass)
     {
@@ -512,14 +597,16 @@ namespace MWPhysics
         std::shared_ptr<Resource::BulletShapeInstance> shapeInstance = mShapeManager->getInstance(mesh);
         if (!shapeInstance || !shapeInstance->mCollisionShape)
         {
-            Log(Debug::Warning) << "No collision shape for dynamic object " << ptr.toString() << " (" << mesh.value()
-                                << ")";
+            if (mWarnedNoShape.emplace(mesh.value()).second)
+                Log(Debug::Warning) << "No collision shape for dynamic object " << ptr.toString() << " ("
+                                    << mesh.value() << ")";
             return;
         }
 
         assert(!getObject(ptr));
 
-        auto obj = std::make_shared<Object>(ptr, shapeInstance, rotation, mass, mTaskScheduler.get());
+        const std::vector<btVector3>& hullPoints = getHullPoints(mesh, *shapeInstance->getSource());
+        auto obj = std::make_shared<Object>(ptr, shapeInstance, rotation, mass, hullPoints, mTaskScheduler.get());
 
         if (!ptr.getCellRef().getRefNum().hasContentFile())
         {
@@ -534,29 +621,27 @@ namespace MWPhysics
     void PhysicsSystem::placeOnSurface(Object& object)
     {
         // Objects placed or moved by the game (PlaceAtPC, snapping to ground) are positioned by their origin,
-        // which for most meshes is the center. The simulation would then start half-buried, and on slopes
-        // can push them out through the wrong side. Lift the shape so its bottom rests on the surface.
-        const float bottom = object.getDynamicShapeBottom();
+        // which for most meshes is the center, or may even be inside other geometry (e.g. a stair step). The
+        // simulation would push such objects out through the wrong side. Lift the shape onto the surface instead.
+        const auto [bottom, top] = object.getDynamicShapeHeightRange();
         const osg::Vec3f position = object.getPtr().getRefData().getPosition().asVec3();
-        float surface = bottom;
+        float lift = 0;
 
         // Terrain can't be overhead, so search it from high above (handles objects buried in a hillside).
         const RayCastingResult terrain = castRay(osg::Vec3f(position.x(), position.y(), bottom + 2000.f),
             osg::Vec3f(position.x(), position.y(), bottom), {}, {}, CollisionType_HeightMap);
         if (terrain.mHit)
-            surface = std::max(surface, terrain.mHitPos.z());
+            lift = std::max(lift, terrain.mHitPos.z() - bottom);
 
-        // Other surfaces: search down from the origin, so a shelf overhead isn't mistaken for the floor.
-        if (position.z() > bottom)
-        {
-            const RayCastingResult floor = castRay(osg::Vec3f(position.x(), position.y(), position.z() + 1.f),
-                osg::Vec3f(position.x(), position.y(), bottom), {}, {}, CollisionType_World | CollisionType_Door);
-            if (floor.mHit)
-                surface = std::max(surface, floor.mHitPos.z());
-        }
+        // Other surfaces: look up through the object's own height. A surface found there is one the object is
+        // stuck in (a floor it is half below, a step it is inside); a shelf overhead is out of reach.
+        const RayCastingResult inside = castRay(osg::Vec3f(position.x(), position.y(), bottom + lift),
+            osg::Vec3f(position.x(), position.y(), top + lift), {}, {}, CollisionType_World | CollisionType_Door);
+        if (inside.mHit)
+            lift = std::max(lift, inside.mHitPos.z() - bottom);
 
-        if (surface > bottom)
-            object.moveBy(osg::Vec3f(0, 0, surface - bottom + 1.f));
+        if (lift > 0)
+            object.moveBy(osg::Vec3f(0, 0, lift + 1.f));
     }
 
     void PhysicsSystem::remove(const MWWorld::Ptr& ptr)
@@ -995,6 +1080,8 @@ namespace MWPhysics
         mWaterCollisionShape = std::make_unique<btStaticPlaneShape>(btVector3(0, 0, 1), mWaterHeight);
         mWaterCollisionObject->setCollisionShape(mWaterCollisionShape.get());
         mWaterCollisionObject->setCollisionFlags(btCollisionObject::CF_STATIC_OBJECT);
+        // Static, so never "awake": the dynamics step skips pairs where both objects sleep.
+        mWaterCollisionObject->setActivationState(ISLAND_SLEEPING);
         mTaskScheduler->addCollisionObject(
             mWaterCollisionObject.get(), CollisionType_Water, CollisionType_Actor | CollisionType_Projectile);
     }

@@ -11,7 +11,7 @@
 
 #include <BulletCollision/CollisionShapes/btBoxShape.h>
 #include <BulletCollision/CollisionShapes/btCompoundShape.h>
-#include <BulletCollision/CollisionShapes/btCylinderShape.h>
+#include <BulletCollision/CollisionShapes/btConvexHullShape.h>
 #include <BulletDynamics/Dynamics/btRigidBody.h>
 
 #include <LinearMath/btMotionState.h>
@@ -79,12 +79,14 @@ namespace MWPhysics
         mCollisionObject->setUserPointer(this);
         mShapeInstance->setLocalScaling(mScale);
         mCollisionObject->setCollisionFlags(btCollisionObject::CF_STATIC_OBJECT);
+        // Static, so never "awake": the dynamics step skips pairs where both objects sleep.
+        mCollisionObject->setActivationState(ISLAND_SLEEPING);
         mTaskScheduler->addCollisionObject(mCollisionObject.get(), collisionType,
             CollisionType_Actor | CollisionType_HeightMap | CollisionType_Projectile | CollisionType_Dynamic);
     }
 
     Object::Object(const MWWorld::Ptr& ptr, std::shared_ptr<Resource::BulletShapeInstance> shapeInstance,
-        osg::Quat rotation, float mass, PhysicsTaskScheduler* scheduler)
+        osg::Quat rotation, float mass, const std::vector<btVector3>& hullPoints, PhysicsTaskScheduler* scheduler)
         : PtrHolder(ptr, osg::Vec3f())
         , mShapeInstance(std::move(shapeInstance))
         , mSolid(true)
@@ -94,23 +96,40 @@ namespace MWPhysics
         , mTaskScheduler(scheduler)
         , mCollidedWith(ScriptedCollisionType_None)
     {
-        // Approximate the mesh with a simple convex shape fitted to its bounding box.
         mShapeInstance->setLocalScaling(mScale);
         btVector3 aabbMin;
         btVector3 aabbMax;
-        mShapeInstance->mCollisionShape->getAabb(btTransform::getIdentity(), aabbMin, aabbMax);
+        if (hullPoints.empty())
+            mShapeInstance->mCollisionShape->getAabb(btTransform::getIdentity(), aabbMin, aabbMax);
+        else
+        {
+            aabbMin = aabbMax = hullPoints.front() * mScale;
+            for (const btVector3& point : hullPoints)
+            {
+                aabbMin.setMin(point * mScale);
+                aabbMax.setMax(point * mScale);
+            }
+        }
+        // The center of the bounding box stands in for the center of mass.
         mCenterOffset = (aabbMin + aabbMax) * 0.5;
         btVector3 halfExtents = (aabbMax - aabbMin) * 0.5;
-        halfExtents.setMax(btVector3(1, 1, 1));
 
-        if (halfExtents.z() >= std::max(halfExtents.x(), halfExtents.y()))
+        // Very thin items (paper, scrolls) get a box with some thickness: a flat hull would be degenerate.
+        constexpr btScalar minHullHalfExtent = 1.f;
+        if (!hullPoints.empty() && halfExtents[halfExtents.minAxis()] >= minHullHalfExtent)
         {
-            // Upright and tall (bottles, jugs): a cylinder, so it rolls once knocked over.
-            const btScalar radius = (halfExtents.x() + halfExtents.y()) * 0.5;
-            mDynamicShape = std::make_unique<btCylinderShapeZ>(btVector3(radius, radius, halfExtents.z()));
+            auto hull = std::make_unique<btConvexHullShape>();
+            for (const btVector3& point : hullPoints)
+                hull->addPoint(point * mScale - mCenterOffset, false);
+            hull->recalcLocalAabb();
+            hull->setMargin(0.3f);
+            mDynamicShape = std::move(hull);
         }
         else
+        {
+            halfExtents.setMax(btVector3(minHullHalfExtent, minHullHalfExtent, minHullHalfExtent));
             mDynamicShape = std::make_unique<btBoxShape>(halfExtents);
+        }
 
         btVector3 inertia(0, 0, 0);
         mDynamicShape->calculateLocalInertia(mass, inertia);
@@ -130,7 +149,7 @@ namespace MWPhysics
 
         auto body = std::make_unique<btRigidBody>(info);
         mRigidBody = body.get();
-        const btScalar minHalfExtent = halfExtents[halfExtents.minAxis()];
+        const btScalar minHalfExtent = std::max(halfExtents[halfExtents.minAxis()], minHullHalfExtent);
         mRigidBody->setCcdMotionThreshold(minHalfExtent);
         mRigidBody->setCcdSweptSphereRadius(minHalfExtent * 0.9f);
         // Clutter from the game files starts asleep, so it stays where the level designer put it until something
@@ -150,13 +169,13 @@ namespace MWPhysics
         mTaskScheduler->removeCollisionObject(mCollisionObject.get());
     }
 
-    float Object::getDynamicShapeBottom() const
+    std::pair<float, float> Object::getDynamicShapeHeightRange() const
     {
         const btTransform centerOfMass = getTransform() * btTransform(btQuaternion::getIdentity(), mCenterOffset);
         btVector3 aabbMin;
         btVector3 aabbMax;
         mDynamicShape->getAabb(centerOfMass, aabbMin, aabbMax);
-        return static_cast<float>(aabbMin.z());
+        return { static_cast<float>(aabbMin.z()), static_cast<float>(aabbMax.z()) };
     }
 
     void Object::moveBy(const osg::Vec3f& offset)

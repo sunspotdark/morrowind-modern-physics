@@ -87,6 +87,8 @@ namespace MWPhysics
         mCollisionObject->setCollisionShape(mShape.get());
         mCollisionObject->setWorldTransform(transform);
         mCollisionObject->setCollisionFlags(btCollisionObject::CF_STATIC_OBJECT);
+        // Static, so never "awake": the dynamics step skips pairs where both objects sleep.
+        mCollisionObject->setActivationState(ISLAND_SLEEPING);
         mTaskScheduler->addCollisionObject(mCollisionObject.get(), CollisionType_HeightMap,
             CollisionType_Actor | CollisionType_Projectile | CollisionType_Dynamic);
     }

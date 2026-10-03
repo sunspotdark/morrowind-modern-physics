@@ -10,6 +10,8 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <utility>
+#include <vector>
 
 class btCollisionShape;
 class btRigidBody;
@@ -37,9 +39,10 @@ namespace MWPhysics
     public:
         Object(const MWWorld::Ptr& ptr, std::shared_ptr<Resource::BulletShapeInstance> shapeInstance,
             osg::Quat rotation, int collisionType, PhysicsTaskScheduler* scheduler);
-        /// Construct a simulated rigid body with the given mass.
+        /// Construct a simulated rigid body with the given mass. Its shape is the convex hull of hullPoints (in
+        /// unscaled mesh space), or a box around the mesh if there are none.
         Object(const MWWorld::Ptr& ptr, std::shared_ptr<Resource::BulletShapeInstance> shapeInstance,
-            osg::Quat rotation, float mass, PhysicsTaskScheduler* scheduler);
+            osg::Quat rotation, float mass, const std::vector<btVector3>& hullPoints, PhysicsTaskScheduler* scheduler);
         ~Object() override;
 
         bool isDynamic() const { return mRigidBody != nullptr; }
@@ -49,8 +52,8 @@ namespace MWPhysics
         /// new position and rotation of the object's origin (as opposed to its center of mass).
         std::optional<std::pair<osg::Vec3f, osg::Quat>> takeSimulatedTransform();
 
-        /// For dynamic objects: world-space height of the lowest point of the simulated shape.
-        float getDynamicShapeBottom() const;
+        /// For dynamic objects: world-space height of the lowest and highest point of the simulated shape.
+        std::pair<float, float> getDynamicShapeHeightRange() const;
 
         /// Move the object; takes effect on the next commitPositionChange.
         void moveBy(const osg::Vec3f& offset);
