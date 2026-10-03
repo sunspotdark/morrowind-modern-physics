@@ -100,6 +100,13 @@ namespace MWInput
             float y = arg.yrel * cameraSensitivity * (Settings::input().mInvertYAxis ? -1 : 1)
                 * Settings::input().mCameraYMultiplier / 256.f;
 
+            // While carrying an item, the rotate key makes the mouse turn the item instead of the view.
+            if (world->isGrabbingObject() && mBindingsManager->actionIsActive(A_RotateHeldItem))
+            {
+                world->rotateGrabbedObject(x, y);
+                return;
+            }
+
             float rot[3];
             rot[0] = -y;
             rot[1] = 0.0f;

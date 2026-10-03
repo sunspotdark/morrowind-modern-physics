@@ -73,7 +73,7 @@ namespace MWPhysics
 
         // Carrying a dynamic object: each physics step it is steered towards the hold target.
         void holdObject(const std::shared_ptr<Object>& object);
-        void setHoldTarget(const btVector3& target);
+        void setHoldTarget(const btVector3& position, const btQuaternion& rotation);
         /// Let go of the held object, optionally setting its velocity (for throwing).
         void releaseHeldObject(const std::optional<btVector3>& velocity);
         std::shared_ptr<Object> getHeldObject() const;
@@ -103,6 +103,8 @@ namespace MWPhysics
         void pushDynamicObjects();
         void stepDynamics();
         void releaseHeldObjectUnsafe(btRigidBody& body, const std::optional<btVector3>& velocity);
+        void updateGrabIgnoredObjects(Object* object);
+        void clearGrabIgnoredObjects(Object* object);
         void syncWithMainThread();
         void waitForWorkers();
         void prepareWork(float& timeAccum, std::vector<Simulation>& simulations, osg::Timer_t frameStart,
@@ -119,6 +121,10 @@ namespace MWPhysics
         int mNumRigidBodies = 0;
         std::weak_ptr<Object> mHeldObject;
         btVector3 mHoldTarget;
+        btQuaternion mHoldTargetRotation;
+        // Static objects the last grabbed object was stuck in when grabbed; it ignores them until clear of them.
+        std::weak_ptr<Object> mGrabIgnoredBody;
+        std::vector<const btCollisionObject*> mGrabIgnoredObjects;
         mutable std::mutex mHeldObjectMutex;
         MWRender::DebugDrawer* mDebugDrawer;
         std::vector<LOSRequest> mLOSCache;

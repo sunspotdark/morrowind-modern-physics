@@ -52,9 +52,11 @@ namespace MWInput
         float mTimeIdle;
 
         // Activate pressed on a carryable object: a tap activates it, holding the key picks it up to carry.
+        // Carrying is a toggle: the next activate press drops the item, attack throws it.
         bool mActivatePending = false;
         float mActivateHeldTime = 0;
         bool mCarrying = false;
+        bool mUseWasHeld = false;
         // After throwing, the attack button stays suppressed until it is released.
         bool mSuppressAttackUntilReleased = false;
     };

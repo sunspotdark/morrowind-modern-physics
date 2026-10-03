@@ -1,7 +1,10 @@
 #ifndef OPENMW_COMPONENTS_BULLETSHAPEMANAGER_H
 #define OPENMW_COMPONENTS_BULLETSHAPEMANAGER_H
 
+#include <map>
 #include <memory>
+#include <mutex>
+#include <string>
 
 #include <osg/ref_ptr>
 
@@ -32,6 +35,10 @@ namespace Resource
         /// @note May return a null pointer if the object has no shape.
         std::shared_ptr<const BulletShape> getShape(VFS::Path::NormalizedView name);
 
+        /// Shape built from the rendered geometry, ignoring any dedicated collision mesh. NIF files only;
+        /// returns nullptr for other formats or meshes without geometry.
+        std::shared_ptr<const BulletShape> getVisibleShape(VFS::Path::NormalizedView name);
+
         /// Create an instance of the given shape and cache it for later use, so that future calls to getInstance() can
         /// simply return the cached instance instead of having to create a new one.
         /// @note The returned shared_ptr may be kept by the caller to ensure that the instance stays in cache for as
@@ -52,6 +59,8 @@ namespace Resource
         std::shared_ptr<BulletShapeInstance> createInstance(VFS::Path::NormalizedView name);
 
         std::unique_ptr<MultiObjectCache<std::shared_ptr<BulletShapeInstance>>> mInstanceCache;
+        std::mutex mVisibleShapesMutex;
+        std::map<std::string, std::shared_ptr<const BulletShape>, std::less<>> mVisibleShapes;
         SceneManager* mSceneManager;
         NifFileManager* mNifFileManager;
     };

@@ -18,6 +18,7 @@
 #include <osg/Timer>
 #include <osg/ref_ptr>
 
+#include <LinearMath/btQuaternion.h>
 #include <LinearMath/btVector3.h>
 
 #include <components/vfs/pathutil.hpp>
@@ -181,9 +182,11 @@ namespace MWPhysics
 
         // Carrying simulated objects (one at a time)
         bool canHoldObject(const MWWorld::ConstPtr& ptr) const;
-        bool holdObject(const MWWorld::Ptr& ptr);
+        bool holdObject(const MWWorld::Ptr& ptr, const osg::Vec3f& viewDirection);
         /// Keep the held object in front of a viewer at eye, looking along direction (normalized).
         void setHoldView(const osg::Vec3f& eye, const osg::Vec3f& direction);
+        /// Turn the held object relative to the viewer (radians).
+        void rotateHeldObject(float yaw, float pitch);
         /// Drop the held object, or throw it along direction (normalized).
         void releaseHeldObject(bool throwObject, const osg::Vec3f& direction);
         bool isHoldingObject() const;
@@ -341,6 +344,7 @@ namespace MWPhysics
         std::vector<std::shared_ptr<Object>> mDynamicObjects; // subset of mObjects
         bool mMovingDynamicObjects = false;
         float mHoldDistance = 0;
+        btQuaternion mHoldRelativeRotation;
         std::unordered_map<std::string, std::vector<btVector3>> mHullCache;
         std::set<std::string, std::less<>> mWarnedNoShape;
 

@@ -10,6 +10,7 @@
 
 #include <BulletCollision/BroadphaseCollision/btDbvtBroadphase.h>
 #include <BulletCollision/CollisionDispatch/btCollisionObject.h>
+#include <BulletCollision/CollisionDispatch/btCollisionObjectWrapper.h>
 #include <BulletCollision/CollisionDispatch/btCollisionWorld.h>
 #include <BulletCollision/CollisionDispatch/btDefaultCollisionConfiguration.h>
 #include <BulletCollision/CollisionShapes/btCompoundShape.h>
@@ -129,6 +130,36 @@ namespace
                 if (body->isActive())
                     updateSingleAabb(body);
             }
+        }
+    };
+
+    // Finds the deepest overlap of a probe object with static geometry, as the move that would resolve it.
+    struct DepenetrationCallback final : public btCollisionWorld::ContactResultCallback
+    {
+        const btCollisionObject* mProbe;
+        btVector3 mPush{ 0, 0, 0 };
+        btScalar mDeepest = 0;
+
+        explicit DepenetrationCallback(const btCollisionObject* probe)
+            : mProbe(probe)
+        {
+            m_collisionFilterGroup = MWPhysics::CollisionType_Dynamic;
+            m_collisionFilterMask
+                = MWPhysics::CollisionType_DynamicSupport;
+        }
+
+        btScalar addSingleResult(btManifoldPoint& cp, const btCollisionObjectWrapper* col0Wrap, int /*partId0*/,
+            int /*index0*/, const btCollisionObjectWrapper* /*col1Wrap*/, int /*partId1*/, int /*index1*/) override
+        {
+            // m_normalWorldOnB points from B towards A.
+            const btScalar depth = -cp.getDistance();
+            if (depth <= 0.05f || depth <= mDeepest)
+                return 0;
+            mDeepest = depth;
+            const btVector3 towardsProbe
+                = col0Wrap->getCollisionObject() == mProbe ? cp.m_normalWorldOnB : -cp.m_normalWorldOnB;
+            mPush = towardsProbe * (depth + 0.1f);
+            return 0;
         }
     };
 
@@ -564,6 +595,22 @@ namespace MWPhysics
 
         if (obj->isAnimated())
             mAnimatedObjects.emplace(obj.get(), false);
+        else if (collisionType == CollisionType_World && shapeInstance->getSource()->mHasCollisionNode)
+        {
+            // Furniture often has a simplified collision mesh (a bookcase may be a hollow box). Simulated
+            // objects need the real shape to rest on its shelves, so give them the rendered geometry instead.
+            // Large objects (buildings, rocks) keep the regular collision: too costly, and rarely needed.
+            if (std::shared_ptr<const Resource::BulletShape> visible = mShapeManager->getVisibleShape(animationMesh))
+            {
+                btVector3 aabbMin;
+                btVector3 aabbMax;
+                visible->mCollisionShape->getAabb(btTransform::getIdentity(), aabbMin, aabbMax);
+                const btVector3 size = (aabbMax - aabbMin) * ptr.getCellRef().getScale();
+                constexpr btScalar maxFurnitureSize = 400.f;
+                if (size[size.maxAxis()] <= maxFurnitureSize)
+                    obj->setDetailShape(Resource::makeInstance(std::move(visible)));
+            }
+        }
     }
 
     const std::vector<btVector3>& PhysicsSystem::getHullPoints(
@@ -605,7 +652,10 @@ namespace MWPhysics
 
         assert(!getObject(ptr));
 
-        const std::vector<btVector3>& hullPoints = getHullPoints(mesh, *shapeInstance->getSource());
+        // Fit the hull to what the player sees; the collision mesh can be smaller (items poking into floors).
+        const std::shared_ptr<const Resource::BulletShape> visible = mShapeManager->getVisibleShape(mesh);
+        const std::vector<btVector3>& hullPoints
+            = getHullPoints(mesh, visible != nullptr ? *visible : *shapeInstance->getSource());
         auto obj = std::make_shared<Object>(ptr, shapeInstance, rotation, mass, hullPoints, mTaskScheduler.get());
 
         if (!ptr.getCellRef().getRefNum().hasContentFile())
@@ -624,7 +674,16 @@ namespace MWPhysics
         return object != nullptr && object->isDynamic();
     }
 
-    bool PhysicsSystem::holdObject(const MWWorld::Ptr& ptr)
+    namespace
+    {
+        // Rotation about the vertical that turns the default view direction (+Y) into direction.
+        btQuaternion viewYaw(const osg::Vec3f& direction)
+        {
+            return btQuaternion(btVector3(0, 0, 1), std::atan2(-direction.x(), direction.y()));
+        }
+    }
+
+    bool PhysicsSystem::holdObject(const MWWorld::Ptr& ptr, const osg::Vec3f& viewDirection)
     {
         const auto found = mObjects.find(ptr.mRef);
         if (found == mObjects.end() || !found->second->isDynamic())
@@ -638,13 +697,25 @@ namespace MWPhysics
         const float radius = static_cast<float>((aabbMax - aabbMin).length() * 0.5);
         mHoldDistance = std::max(70.f, 40.f + radius);
 
+        // Keep the orientation it has relative to the viewer, so it turns along when the viewer turns.
+        mHoldRelativeRotation = viewYaw(viewDirection).inverse() * object->getTransform().getRotation();
+
         mTaskScheduler->holdObject(object);
         return true;
     }
 
     void PhysicsSystem::setHoldView(const osg::Vec3f& eye, const osg::Vec3f& direction)
     {
-        mTaskScheduler->setHoldTarget(Misc::Convert::toBullet(eye + direction * mHoldDistance));
+        mTaskScheduler->setHoldTarget(Misc::Convert::toBullet(eye + direction * mHoldDistance),
+            viewYaw(direction) * mHoldRelativeRotation);
+    }
+
+    void PhysicsSystem::rotateHeldObject(float yaw, float pitch)
+    {
+        // In the viewer's frame (view yaw removed): spin around the vertical, tilt around the sideways axis.
+        mHoldRelativeRotation = btQuaternion(btVector3(0, 0, 1), yaw) * btQuaternion(btVector3(1, 0, 0), pitch)
+            * mHoldRelativeRotation;
+        mHoldRelativeRotation.normalize();
     }
 
     void PhysicsSystem::releaseHeldObject(bool throwObject, const osg::Vec3f& direction)
@@ -683,15 +754,52 @@ namespace MWPhysics
         if (terrain.mHit)
             lift = std::max(lift, terrain.mHitPos.z() - bottom);
 
-        // Other surfaces: look up through the object's own height. A surface found there is one the object is
-        // stuck in (a floor it is half below, a step it is inside); a shelf overhead is out of reach.
-        const RayCastingResult inside = castRay(osg::Vec3f(position.x(), position.y(), bottom + lift),
-            osg::Vec3f(position.x(), position.y(), top + lift), {}, {}, CollisionType_World | CollisionType_Door);
-        if (inside.mHit)
-            lift = std::max(lift, inside.mHitPos.z() - bottom);
+        // Other surfaces: is the object's bottom inside something solid (half below a floor, deep inside a
+        // staircase)? Then looking up and looking down from above both first meet the same surface: its top.
+        // Under a table they meet different ones (the underside and the top), so it stays put.
+        constexpr float searchHeight = 200.f;
+        constexpr int supportMask = CollisionType_World | CollisionType_Door | CollisionType_DynamicDetail;
+        const float from = bottom + lift;
+        const RayCastingResult up = castRay(osg::Vec3f(position.x(), position.y(), from),
+            osg::Vec3f(position.x(), position.y(), from + searchHeight), {}, {}, supportMask, CollisionType_Dynamic);
+        bool inside = false;
+        RayCastingResult down;
+        if (up.mHit)
+        {
+            // Start a little above that surface, so a floor further up (stairs to a gallery) isn't in the way.
+            const float downFrom = up.mHitPos.z() + 30.f;
+            down = castRay(osg::Vec3f(position.x(), position.y(), downFrom),
+                osg::Vec3f(position.x(), position.y(), from), {}, {}, supportMask, CollisionType_Dynamic);
+            inside = down.mHit && std::abs(up.mHitPos.z() - down.mHitPos.z()) < 1.f;
+        }
+        if (inside)
+            lift = std::max(lift, down.mHitPos.z() - bottom);
 
-        if (lift > 0)
-            object.moveBy(osg::Vec3f(0, 0, lift + 1.f));
+        btVector3 offset(0, 0, lift > 0 ? lift + 1.f : 0.f);
+
+        // The rays above only look straight up and down through the middle. The shape can still overlap
+        // things off-center, like the front of the next stair step. Push it out along the contacts.
+        btCollisionObject probe;
+        probe.setCollisionShape(object.getDynamicShape());
+        const btTransform centerOfMass = object.getCenterOfMassTransform();
+        for (int i = 0; i < 4; ++i)
+        {
+            probe.setWorldTransform(btTransform(centerOfMass.getRotation(), centerOfMass.getOrigin() + offset));
+            DepenetrationCallback depenetration(&probe);
+            mTaskScheduler->contactTest(&probe, depenetration);
+            if (depenetration.mPush.isZero())
+                break;
+            offset += depenetration.mPush;
+        }
+
+        if (!offset.isZero())
+        {
+            Log(Debug::Verbose) << "[physics] placed " << object.getPtr().getCellRef().getRefId() << ": lifted "
+                             << lift << ", pushed out by (" << offset.x() << ", " << offset.y() << ", "
+                             << offset.z() << ")" << (terrain.mHit ? " terrain" : "")
+                             << (inside ? " inside-static" : "");
+            object.moveBy(Misc::Convert::toOsg(offset));
+        }
     }
 
     void PhysicsSystem::remove(const MWWorld::Ptr& ptr)
@@ -1034,7 +1142,32 @@ namespace MWPhysics
             const auto transform = object->takeSimulatedTransform();
             if (!transform)
                 continue;
-            const MWWorld::Ptr ptr = world->moveObject(object->getPtr(), transform->first, false, false);
+
+            // Safety net: something that slipped through the ground would fall forever. Put it back on top.
+            const MWWorld::Ptr current = object->getPtr();
+            const MWWorld::CellStore* cell = current.getCell();
+            const osg::Vec3f& position = transform->first;
+            std::optional<osg::Vec3f> rescue;
+            if (cell->isExterior())
+            {
+                const float terrain = world->getTerrainHeightAt(position, cell->getCell()->getWorldSpace());
+                if (position.z() < terrain - 100.f)
+                    rescue = osg::Vec3f(position.x(), position.y(), terrain);
+            }
+            else if (position.z() < object->getPlacedPosition().z() - 3000.f)
+                rescue = object->getPlacedPosition();
+            if (rescue)
+            {
+                Log(Debug::Verbose) << "[physics] rescued " << current.getCellRef().getRefId() << " from z "
+                                 << position.z();
+                world->moveObject(current, *rescue, false, false);
+                object->updatePosition();
+                placeOnSurface(*object);
+                mTaskScheduler->updateSingleAabb(object);
+                continue;
+            }
+
+            const MWWorld::Ptr ptr = world->moveObject(current, position, false, false);
             world->rotateObject(ptr, toEsmRotation(transform->second), MWBase::RotationFlag_none);
         }
         mMovingDynamicObjects = false;

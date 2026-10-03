@@ -46,6 +46,10 @@ namespace MWPhysics
         ~Object() override;
 
         bool isDynamic() const { return mRigidBody != nullptr; }
+
+        /// For static objects: collide with simulated objects using this (more detailed) shape instead.
+        void setDetailShape(std::shared_ptr<Resource::BulletShapeInstance> shapeInstance);
+        btCollisionObject* getDetailCollisionObject() const { return mDetailCollisionObject.get(); }
         btRigidBody* getRigidBody() const { return mRigidBody; }
 
         /// For dynamic objects: if the simulation moved the body since the last call, return the
@@ -54,9 +58,15 @@ namespace MWPhysics
 
         /// For dynamic objects: world-space height of the lowest and highest point of the simulated shape.
         std::pair<float, float> getDynamicShapeHeightRange() const;
+        /// For dynamic objects: the simulated shape, and where it is for the object's current position.
+        btCollisionShape* getDynamicShape() const { return mDynamicShape.get(); }
+        btTransform getCenterOfMassTransform() const;
 
         /// Move the object; takes effect on the next commitPositionChange.
         void moveBy(const osg::Vec3f& offset);
+
+        /// For dynamic objects: where it was last placed by the game (not the simulation).
+        osg::Vec3f getPlacedPosition() const;
 
         const std::shared_ptr<Resource::BulletShapeInstance>& getShapeInstance() const;
         void setScale(float scale);
@@ -88,11 +98,16 @@ namespace MWPhysics
         PhysicsTaskScheduler* mTaskScheduler;
         char mCollidedWith;
 
+        // Static objects only
+        std::shared_ptr<Resource::BulletShapeInstance> mDetailShapeInstance;
+        std::unique_ptr<btCollisionObject> mDetailCollisionObject;
+
         // Dynamic objects only
         std::unique_ptr<btCollisionShape> mDynamicShape;
         std::unique_ptr<DynamicMotionState> mMotionState;
         btRigidBody* mRigidBody = nullptr; // same object as mCollisionObject
         btVector3 mCenterOffset; // center of mass relative to object origin, in object space
+        osg::Vec3f mPlacedPosition;
     };
 }
 

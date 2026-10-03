@@ -78,16 +78,19 @@ namespace MWInput
             }
         }
 
+        const bool usePressed = useHeld && !mUseWasHeld;
+        mUseWasHeld = useHeld;
+
         if (mCarrying)
         {
             if (!world->isGrabbingObject()) // let go by the physics (stuck, or the object went away)
                 mCarrying = false;
-            else if (guiMode || !activateHeld)
+            else if (guiMode)
             {
                 world->releaseGrabbedObject(false);
                 mCarrying = false;
             }
-            else if (useHeld)
+            else if (usePressed)
             {
                 world->releaseGrabbedObject(true);
                 mCarrying = false;
@@ -124,7 +127,13 @@ namespace MWInput
                 break;
             case A_Activate:
                 inputManager->resetIdleTime();
-                if (!windowManager->isGuiMode() && inputManager->getControlSwitch("playercontrols")
+                if (mCarrying && !windowManager->isGuiMode())
+                {
+                    // Carrying is a toggle: this press only puts the item down.
+                    MWBase::Environment::get().getWorld()->releaseGrabbedObject(false);
+                    mCarrying = false;
+                }
+                else if (!windowManager->isGuiMode() && inputManager->getControlSwitch("playercontrols")
                     && MWBase::Environment::get().getWorld()->canGrabObject(
                         MWBase::Environment::get().getWorld()->getFocusObject()))
                 {

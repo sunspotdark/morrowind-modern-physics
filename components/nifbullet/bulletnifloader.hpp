@@ -38,6 +38,13 @@ namespace NifBullet
     class BulletNifLoader
     {
     public:
+        /// @param visibleGeometry build the shape from the rendered geometry even if the mesh has a
+        /// RootCollisionNode (used for simulated objects, which need the real shape of things).
+        explicit BulletNifLoader(bool visibleGeometry = false)
+            : mVisibleGeometry(visibleGeometry)
+        {
+        }
+
         void warn(const std::string& msg) { Log(Debug::Warning) << "NIFLoader: Warn: " << msg; }
 
         [[noreturn]] void fail(const std::string& msg)
@@ -69,6 +76,7 @@ namespace NifBullet
         std::unique_ptr<btCompoundShape, Resource::DeleteCollisionShape> mAvoidCompoundShape;
 
         std::shared_ptr<Resource::BulletShape> mShape;
+        bool mVisibleGeometry;
     };
 
 }

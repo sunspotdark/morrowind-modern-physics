@@ -68,6 +68,8 @@ namespace MWInput
 
         A_TogglePostProcessorHUD = 50,
 
+        A_RotateHeldItem = 51, // Hold to turn a carried item with the mouse
+
         A_Last // Marker for the last item
     };
 }

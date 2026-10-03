@@ -165,6 +165,23 @@ namespace Resource
         return shape;
     }
 
+    std::shared_ptr<const BulletShape> BulletShapeManager::getVisibleShape(VFS::Path::NormalizedView name)
+    {
+        if (Misc::getFileExtension(name.value()) != "nif")
+            return nullptr;
+
+        std::lock_guard lock(mVisibleShapesMutex);
+        if (const auto found = mVisibleShapes.find(name.value()); found != mVisibleShapes.end())
+            return found->second;
+
+        NifBullet::BulletNifLoader loader(true);
+        std::shared_ptr<const BulletShape> shape = loader.load(*mNifFileManager->get(name));
+        if (shape != nullptr && shape->mCollisionShape == nullptr)
+            shape = nullptr;
+        mVisibleShapes.emplace(name.value(), shape);
+        return shape;
+    }
+
     std::shared_ptr<BulletShapeInstance> BulletShapeManager::cacheInstance(VFS::Path::NormalizedView name)
     {
         std::shared_ptr<BulletShapeInstance> instance = createInstance(name);
@@ -199,6 +216,9 @@ namespace Resource
         ResourceManager<std::shared_ptr<const BulletShape>>::clearCache();
 
         mInstanceCache->clear();
+
+        std::lock_guard lock(mVisibleShapesMutex);
+        mVisibleShapes.clear();
     }
 
     void BulletShapeManager::reportStats(unsigned int frameNumber, osg::Stats* stats) const

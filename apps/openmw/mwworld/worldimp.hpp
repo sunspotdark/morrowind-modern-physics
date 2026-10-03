@@ -388,6 +388,7 @@ namespace MWWorld
         bool grabObject(const MWWorld::Ptr& ptr) override;
         void releaseGrabbedObject(bool throwObject) override;
         bool isGrabbingObject() const override;
+        void rotateGrabbedObject(float yaw, float pitch) override;
         void setPlayerAttackSuppressed(bool suppressed) override { mPlayerAttackSuppressed = suppressed; }
         bool isPlayerAttackSuppressed() const override { return mPlayerAttackSuppressed; }
 

@@ -169,6 +169,13 @@ namespace NifBullet
             const Nif::NiNode* ninode = dynamic_cast<const Nif::NiNode*>(&node);
             if (ninode)
                 args.mCollisionNode = ninode->findRootCollisionNode(recursiveRcn);
+            mShape->mHasCollisionNode = args.mCollisionNode != nullptr && !args.mCollisionNode->mChildren.empty();
+            if (mVisibleGeometry)
+            {
+                // Rendered geometry only; RootCollisionNodes are skipped in handleNode.
+                args.mCollisionNode = nullptr;
+                mShape->mVisualCollisionType = Resource::VisualCollisionType::None;
+            }
             if (!args.mCollisionNode)
                 args.mGenerateCollision = true;
             else if (args.mCollisionNode->mChildren.empty())
@@ -205,6 +212,9 @@ namespace NifBullet
                     continue;
             }
         }
+
+        if (mVisibleGeometry && node.mRecordType == Nif::RC_RootCollisionNode)
+            return;
 
         if (node.mRecordType == Nif::RC_RootCollisionNode)
         {

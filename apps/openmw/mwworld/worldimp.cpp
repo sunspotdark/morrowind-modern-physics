@@ -1384,7 +1384,15 @@ namespace MWWorld
 
     bool World::grabObject(const MWWorld::Ptr& ptr)
     {
-        return !ptr.isEmpty() && mPhysics->holdObject(ptr);
+        if (ptr.isEmpty())
+            return false;
+        const MWRender::Camera* camera = mRendering->getCamera();
+        return mPhysics->holdObject(ptr, camera->getOrient() * osg::Vec3f(0, 1, 0));
+    }
+
+    void World::rotateGrabbedObject(float yaw, float pitch)
+    {
+        mPhysics->rotateHeldObject(yaw, pitch);
     }
 
     void World::releaseGrabbedObject(bool throwObject)

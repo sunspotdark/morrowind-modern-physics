@@ -182,6 +182,37 @@ namespace
         const btCollisionObject* mActor;
     };
 
+    // Finds the static objects a body penetrates deeper than a given depth.
+    class PenetrationCallback final : public btCollisionWorld::ContactResultCallback
+    {
+    public:
+        PenetrationCallback(const btCollisionObject* body, btScalar minDepth)
+            : mBody(body)
+            , mMinDepth(minDepth)
+        {
+            m_collisionFilterGroup = MWPhysics::CollisionType_Dynamic;
+            m_collisionFilterMask = MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door
+                | MWPhysics::CollisionType_DynamicDetail;
+        }
+
+        btScalar addSingleResult(btManifoldPoint& cp, const btCollisionObjectWrapper* col0Wrap, int /*partId0*/,
+            int /*index0*/, const btCollisionObjectWrapper* col1Wrap, int /*partId1*/, int /*index1*/) override
+        {
+            const btCollisionObject* other = col0Wrap->getCollisionObject() == mBody
+                ? col1Wrap->getCollisionObject()
+                : col0Wrap->getCollisionObject();
+            if (cp.getDistance() < -mMinDepth && std::find(mOthers.begin(), mOthers.end(), other) == mOthers.end())
+                mOthers.push_back(other);
+            return 0;
+        }
+
+        std::vector<const btCollisionObject*> mOthers;
+
+    private:
+        const btCollisionObject* mBody;
+        btScalar mMinDepth;
+    };
+
     osg::Vec3f interpolateMovements(const MWPhysics::PtrHolder& ptr, float timeAccum, float physicsDt)
     {
         const float interpolationFactor = std::clamp(timeAccum / physicsDt, 0.0f, 1.0f);
@@ -798,6 +829,8 @@ namespace MWPhysics
         {
             object->commitPositionChange();
             mCollisionWorld->updateSingleAabb(object->getCollisionObject());
+            if (btCollisionObject* detail = object->getDetailCollisionObject())
+                mCollisionWorld->updateSingleAabb(detail);
         }
         else if (const auto projectile = std::dynamic_pointer_cast<Projectile>(ptr))
         {
@@ -991,14 +1024,20 @@ namespace MWPhysics
 
         // Locked object must outlive the collision world lock (its destructor takes the lock).
         std::shared_ptr<Object> held;
+        std::shared_ptr<Object> grabIgnoredBody;
         btVector3 holdTarget;
+        btQuaternion holdTargetRotation;
         {
             std::lock_guard heldLock(mHeldObjectMutex);
             held = mHeldObject.lock();
+            grabIgnoredBody = mGrabIgnoredBody.lock();
             holdTarget = mHoldTarget;
+            holdTargetRotation = mHoldTargetRotation;
         }
 
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+
+        updateGrabIgnoredObjects(grabIgnoredBody.get());
 
         if (held != nullptr)
         {
@@ -1020,7 +1059,19 @@ namespace MWPhysics
                 if (velocity.length2() > maxCarrySpeed * maxCarrySpeed)
                     velocity *= maxCarrySpeed / velocity.length();
                 body.setLinearVelocity(velocity);
-                body.setAngularVelocity(body.getAngularVelocity() * 0.8f);
+
+                // Likewise turn it towards the target orientation, the short way round.
+                btQuaternion error = holdTargetRotation * body.getOrientation().inverse();
+                if (error.getW() < 0)
+                    error = -error;
+                const btScalar angle = error.getAngle();
+                btVector3 angularVelocity(0, 0, 0);
+                if (angle > 1e-4f)
+                    angularVelocity = error.getAxis() * (angle * 0.5f / mPhysicsDt);
+                constexpr btScalar maxCarrySpin = 20.f; // rad/s
+                if (angularVelocity.length2() > maxCarrySpin * maxCarrySpin)
+                    angularVelocity *= maxCarrySpin / angularVelocity.length();
+                body.setAngularVelocity(angularVelocity);
             }
         }
 
@@ -1031,19 +1082,39 @@ namespace MWPhysics
     void PhysicsTaskScheduler::holdObject(const std::shared_ptr<Object>& object)
     {
         releaseHeldObject(std::nullopt);
+        // Locked object must outlive the collision world lock (its destructor takes the lock).
+        std::shared_ptr<Object> previousGrabIgnoredBody;
+        {
+            std::lock_guard heldLock(mHeldObjectMutex);
+            previousGrabIgnoredBody = mGrabIgnoredBody.lock();
+        }
+
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
         btRigidBody& body = *object->getRigidBody();
         body.setActivationState(DISABLE_DEACTIVATION);
         body.setGravity(btVector3(0, 0, 0));
+
+        // Placed items often sit partly inside what they rest on (books in shelves), which would wedge them in
+        // place. Let the item pass through whatever it is stuck in until it is clear of it.
+        clearGrabIgnoredObjects(previousGrabIgnoredBody.get());
+        PenetrationCallback penetrating(&body, 0.5f);
+        ContactTestWrapper::contactTest(mCollisionWorld, &body, penetrating);
+        for (const btCollisionObject* other : penetrating.mOthers)
+            body.setIgnoreCollisionCheck(other, true);
+        mGrabIgnoredObjects = std::move(penetrating.mOthers);
+
         std::lock_guard heldLock(mHeldObjectMutex);
+        mGrabIgnoredBody = object;
         mHeldObject = object;
         mHoldTarget = body.getCenterOfMassPosition();
+        mHoldTargetRotation = body.getOrientation();
     }
 
-    void PhysicsTaskScheduler::setHoldTarget(const btVector3& target)
+    void PhysicsTaskScheduler::setHoldTarget(const btVector3& position, const btQuaternion& rotation)
     {
         std::lock_guard heldLock(mHeldObjectMutex);
-        mHoldTarget = target;
+        mHoldTarget = position;
+        mHoldTargetRotation = rotation;
     }
 
     void PhysicsTaskScheduler::releaseHeldObject(const std::optional<btVector3>& velocity)
@@ -1074,6 +1145,40 @@ namespace MWPhysics
             if (current.length2() > maxDropSpeed * maxDropSpeed)
                 body.setLinearVelocity(current * (maxDropSpeed / current.length()));
         }
+    }
+
+    void PhysicsTaskScheduler::updateGrabIgnoredObjects(Object* object)
+    {
+        // Called with the collision world locked. object is mGrabIgnoredBody, locked by the caller beforehand.
+        if (mGrabIgnoredObjects.empty())
+            return;
+        if (object == nullptr)
+        {
+            mGrabIgnoredObjects.clear();
+            return;
+        }
+        btRigidBody& body = *object->getRigidBody();
+        std::erase_if(mGrabIgnoredObjects, [&](const btCollisionObject* other) {
+            // Static objects can be unloaded in the meantime; only touch ones still in the world.
+            if (mCollisionObjects.find(other) == mCollisionObjects.end())
+                return true;
+            PenetrationCallback overlap(&body, 0.f);
+            ContactTestWrapper::contactPairTest(
+                mCollisionWorld, &body, const_cast<btCollisionObject*>(other), overlap);
+            if (!overlap.mOthers.empty())
+                return false;
+            body.setIgnoreCollisionCheck(other, false);
+            return true;
+        });
+    }
+
+    void PhysicsTaskScheduler::clearGrabIgnoredObjects(Object* object)
+    {
+        // Called with the collision world locked. object is mGrabIgnoredBody, locked by the caller beforehand.
+        if (object != nullptr)
+            for (const btCollisionObject* other : mGrabIgnoredObjects)
+                object->getRigidBody()->setIgnoreCollisionCheck(other, false);
+        mGrabIgnoredObjects.clear();
     }
 
     std::shared_ptr<Object> PhysicsTaskScheduler::getHeldObject() const

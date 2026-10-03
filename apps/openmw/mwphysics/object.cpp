@@ -1,5 +1,6 @@
 #include "object.hpp"
 #include "mtphysics.hpp"
+#include <algorithm>
 #include <memory>
 
 #include <components/bullethelpers/collisionobject.hpp>
@@ -121,8 +122,9 @@ namespace MWPhysics
             auto hull = std::make_unique<btConvexHullShape>();
             for (const btVector3& point : hullPoints)
                 hull->addPoint(point * mScale - mCenterOffset, false);
+            // Thin hulls (blades, plates) get a thicker skin, so they cannot slip through the ground.
+            hull->setMargin(std::clamp(2.5f - static_cast<float>(halfExtents[halfExtents.minAxis()]), 0.3f, 1.5f));
             hull->recalcLocalAabb();
-            hull->setMargin(0.3f);
             mDynamicShape = std::move(hull);
         }
         else
@@ -136,6 +138,7 @@ namespace MWPhysics
 
         const btTransform centerOfMass = getTransform() * btTransform(btQuaternion::getIdentity(), mCenterOffset);
         mMotionState = std::make_unique<DynamicMotionState>(centerOfMass);
+        mPlacedPosition = mPosition;
 
         btRigidBody::btRigidBodyConstructionInfo info(mass, mMotionState.get(), mDynamicShape.get(), inertia);
         info.m_friction = 0.6f;
@@ -150,8 +153,8 @@ namespace MWPhysics
         auto body = std::make_unique<btRigidBody>(info);
         mRigidBody = body.get();
         const btScalar minHalfExtent = std::max(halfExtents[halfExtents.minAxis()], minHullHalfExtent);
-        mRigidBody->setCcdMotionThreshold(minHalfExtent);
-        mRigidBody->setCcdSweptSphereRadius(minHalfExtent * 0.9f);
+        mRigidBody->setCcdMotionThreshold(minHalfExtent * 0.5f);
+        mRigidBody->setCcdSweptSphereRadius(minHalfExtent);
         // Clutter from the game files starts asleep, so it stays where the level designer put it until something
         // touches it. Objects created during play (dropped, spawned) settle under gravity right away.
         if (ptr.getCellRef().getRefNum().hasContentFile())
@@ -160,22 +163,50 @@ namespace MWPhysics
         mCollisionObject = std::move(body);
 
         mTaskScheduler->addRigidBody(mRigidBody, CollisionType_Dynamic,
-            CollisionType_World | CollisionType_Door | CollisionType_HeightMap | CollisionType_Actor
-                | CollisionType_Dynamic);
+            CollisionType_DynamicSupport | CollisionType_Actor | CollisionType_Dynamic);
     }
 
     Object::~Object()
     {
+        if (mDetailCollisionObject != nullptr)
+            mTaskScheduler->removeCollisionObject(mDetailCollisionObject.get());
         mTaskScheduler->removeCollisionObject(mCollisionObject.get());
+    }
+
+    void Object::setDetailShape(std::shared_ptr<Resource::BulletShapeInstance> shapeInstance)
+    {
+        mDetailShapeInstance = std::move(shapeInstance);
+        mDetailShapeInstance->setLocalScaling(mScale);
+        const btTransform transform = getTransform();
+        mDetailCollisionObject = BulletHelpers::makeCollisionObject(
+            mDetailShapeInstance->mCollisionShape.get(), transform.getOrigin(), transform.getRotation());
+        mDetailCollisionObject->setUserPointer(this);
+        mDetailCollisionObject->setCollisionFlags(btCollisionObject::CF_STATIC_OBJECT);
+        mDetailCollisionObject->setActivationState(ISLAND_SLEEPING);
+        mTaskScheduler->addCollisionObject(
+            mDetailCollisionObject.get(), CollisionType_DynamicDetail, CollisionType_Dynamic);
+        // Simulated objects now use the detailed shape instead of the regular one.
+        mTaskScheduler->setCollisionFilterMask(
+            mCollisionObject.get(), CollisionType_Actor | CollisionType_HeightMap | CollisionType_Projectile);
+    }
+
+    btTransform Object::getCenterOfMassTransform() const
+    {
+        return getTransform() * btTransform(btQuaternion::getIdentity(), mCenterOffset);
     }
 
     std::pair<float, float> Object::getDynamicShapeHeightRange() const
     {
-        const btTransform centerOfMass = getTransform() * btTransform(btQuaternion::getIdentity(), mCenterOffset);
         btVector3 aabbMin;
         btVector3 aabbMax;
-        mDynamicShape->getAabb(centerOfMass, aabbMin, aabbMax);
+        mDynamicShape->getAabb(getCenterOfMassTransform(), aabbMin, aabbMax);
         return { static_cast<float>(aabbMin.z()), static_cast<float>(aabbMax.z()) };
+    }
+
+    osg::Vec3f Object::getPlacedPosition() const
+    {
+        std::unique_lock<std::mutex> lock(mPositionMutex);
+        return mPlacedPosition;
     }
 
     void Object::moveBy(const osg::Vec3f& offset)
@@ -233,7 +264,11 @@ namespace MWPhysics
         {
             // Dynamic objects keep the shape they were created with.
             if (mRigidBody == nullptr)
+            {
                 mShapeInstance->setLocalScaling(mScale);
+                if (mDetailShapeInstance != nullptr)
+                    mDetailShapeInstance->setLocalScaling(mScale);
+            }
             mScaleUpdatePending = false;
         }
         if (mTransformUpdatePending)
@@ -254,10 +289,15 @@ namespace MWPhysics
                 mRigidBody->clearForces();
                 // Marks the transform as changed, so the game object follows if the move came from moveBy.
                 mMotionState->setWorldTransform(centerOfMass);
+                mPlacedPosition = mPosition;
                 mRigidBody->activate(true);
             }
             else
+            {
                 mCollisionObject->setWorldTransform(trans);
+                if (mDetailCollisionObject != nullptr)
+                    mDetailCollisionObject->setWorldTransform(trans);
+            }
             mTransformUpdatePending = false;
         }
     }

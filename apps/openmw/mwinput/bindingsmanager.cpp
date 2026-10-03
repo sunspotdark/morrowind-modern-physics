@@ -291,6 +291,7 @@ namespace MWInput
         defaultKeyBindings[A_QuickSave] = SDL_SCANCODE_F5;
         defaultKeyBindings[A_QuickLoad] = SDL_SCANCODE_F9;
         defaultKeyBindings[A_TogglePostProcessorHUD] = SDL_SCANCODE_F2;
+        defaultKeyBindings[A_RotateHeldItem] = SDL_SCANCODE_C;
 
         std::map<int, int> defaultMouseButtonBindings;
         defaultMouseButtonBindings[A_Inventory] = SDL_BUTTON_RIGHT;
@@ -516,6 +517,8 @@ namespace MWInput
                 return "#{sQuickLoadCmd}";
             case A_TogglePostProcessorHUD:
                 return "#{OMWEngine:TogglePostProcessorHUD}";
+            case A_RotateHeldItem:
+                return "#{OMWEngine:RotateHeldItem}";
             default:
                 return {}; // not configurable
         }
@@ -575,7 +578,7 @@ namespace MWInput
     const std::initializer_list<int>& BindingsManager::getActionKeySorting()
     {
         static const std::initializer_list<int> actions{ A_MoveForward, A_MoveBackward, A_MoveLeft, A_MoveRight,
-            A_TogglePOV, A_ZoomIn, A_ZoomOut, A_Run, A_AlwaysRun, A_Sneak, A_Activate, A_Use, A_ToggleWeapon,
+            A_TogglePOV, A_ZoomIn, A_ZoomOut, A_Run, A_AlwaysRun, A_Sneak, A_Activate, A_RotateHeldItem, A_Use, A_ToggleWeapon,
             A_ToggleSpell, A_CycleSpellLeft, A_CycleSpellRight, A_CycleWeaponLeft, A_CycleWeaponRight, A_AutoMove,
             A_Jump, A_Inventory, A_Journal, A_Rest, A_Console, A_QuickSave, A_QuickLoad, A_ToggleHUD, A_Screenshot,
             A_QuickKeysMenu, A_QuickKey1, A_QuickKey2, A_QuickKey3, A_QuickKey4, A_QuickKey5, A_QuickKey6, A_QuickKey7,

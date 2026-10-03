@@ -298,6 +298,8 @@ namespace MWBase
         /// Drop the carried object, or throw it where the camera is looking.
         virtual void releaseGrabbedObject(bool throwObject) = 0;
         virtual bool isGrabbingObject() const = 0;
+        /// Turn the carried object: yaw spins it around the vertical, pitch tilts it towards/away from the camera.
+        virtual void rotateGrabbedObject(float yaw, float pitch) = 0;
         /// Stops the player's weapon/spell use (e.g. so clicking to throw doesn't also attack).
         virtual void setPlayerAttackSuppressed(bool suppressed) = 0;
         virtual bool isPlayerAttackSuppressed() const = 0;

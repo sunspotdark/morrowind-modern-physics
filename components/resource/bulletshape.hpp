@@ -60,6 +60,9 @@ namespace Resource
 
         VisualCollisionType mVisualCollisionType = VisualCollisionType::None;
 
+        // The collision comes from a dedicated, usually simplified, collision mesh rather than the visible one.
+        bool mHasCollisionNode = false;
+
         BulletShape() = default;
         // Note this is always a shallow copy and the copy will not autodelete underlying vertex data
         BulletShape(const BulletShape& other);

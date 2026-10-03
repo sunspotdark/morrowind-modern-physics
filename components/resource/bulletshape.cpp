@@ -86,6 +86,7 @@ namespace Resource
         , mFileName(other.mFileName)
         , mFileHash(other.mFileHash)
         , mVisualCollisionType(other.mVisualCollisionType)
+        , mHasCollisionNode(other.mHasCollisionNode)
     {
     }
 
