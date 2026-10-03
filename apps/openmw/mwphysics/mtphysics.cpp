@@ -954,8 +954,6 @@ namespace MWPhysics
             // overlaps gets shoved so the point of contact keeps up with the actor.
             DynamicContactCallback callback(actor->getCollisionObject());
             ContactTestWrapper::contactTest(mCollisionWorld, actor->getCollisionObject(), callback);
-            if (!callback.mContacts.empty())
-                Log(Debug::Info) << "[physics] actor touches " << callback.mContacts.size() << " dynamic objects";
             for (const auto& contact : callback.mContacts)
             {
                 // Push horizontally, away from the actor. If the contact is (nearly) vertical, e.g. the actor is
@@ -977,11 +975,7 @@ namespace MWPhysics
                     continue;
 
                 contact.mBody->activate(true);
-                contact.mBody->applyImpulse(direction * (deficit / contact.mBody->getInvMass()), relativePoint);
-                Log(Debug::Info) << "[physics] push: deficit " << deficit << " normal ("
-                                 << contact.mPushDirection.x() << ", " << contact.mPushDirection.y() << ", "
-                                 << contact.mPushDirection.z() << ")";
-            }
+                contact.mBody->applyImpulse(direction * (deficit / contact.mBody->getInvMass()), relativePoint);            }
         }
     }
 

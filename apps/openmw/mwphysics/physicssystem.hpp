@@ -305,6 +305,7 @@ namespace MWPhysics
         void prepareSimulation(bool willSimulate, std::vector<Simulation>& simulations);
 
         void moveDynamicObjects();
+        void placeOnSurface(Object& object);
 
         std::unique_ptr<btOverlapFilterCallback> mOverlapFilter;
         std::unique_ptr<btBroadphaseInterface> mBroadphase;

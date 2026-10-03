@@ -520,12 +520,43 @@ namespace MWPhysics
         assert(!getObject(ptr));
 
         auto obj = std::make_shared<Object>(ptr, shapeInstance, rotation, mass, mTaskScheduler.get());
-        Log(Debug::Info) << "[physics] added dynamic object " << ptr.toString() << " mass " << mass << " at "
-                         << obj->getRigidBody()->getCenterOfMassPosition().x() << ", "
-                         << obj->getRigidBody()->getCenterOfMassPosition().y() << ", "
-                         << obj->getRigidBody()->getCenterOfMassPosition().z();
+
+        if (!ptr.getCellRef().getRefNum().hasContentFile())
+        {
+            placeOnSurface(*obj);
+            mTaskScheduler->updateSingleAabb(obj);
+        }
+
         mObjects.emplace(ptr.mRef, obj);
         mDynamicObjects.push_back(std::move(obj));
+    }
+
+    void PhysicsSystem::placeOnSurface(Object& object)
+    {
+        // Objects placed or moved by the game (PlaceAtPC, snapping to ground) are positioned by their origin,
+        // which for most meshes is the center. The simulation would then start half-buried, and on slopes
+        // can push them out through the wrong side. Lift the shape so its bottom rests on the surface.
+        const float bottom = object.getDynamicShapeBottom();
+        const osg::Vec3f position = object.getPtr().getRefData().getPosition().asVec3();
+        float surface = bottom;
+
+        // Terrain can't be overhead, so search it from high above (handles objects buried in a hillside).
+        const RayCastingResult terrain = castRay(osg::Vec3f(position.x(), position.y(), bottom + 2000.f),
+            osg::Vec3f(position.x(), position.y(), bottom), {}, {}, CollisionType_HeightMap);
+        if (terrain.mHit)
+            surface = std::max(surface, terrain.mHitPos.z());
+
+        // Other surfaces: search down from the origin, so a shelf overhead isn't mistaken for the floor.
+        if (position.z() > bottom)
+        {
+            const RayCastingResult floor = castRay(osg::Vec3f(position.x(), position.y(), position.z() + 1.f),
+                osg::Vec3f(position.x(), position.y(), bottom), {}, {}, CollisionType_World | CollisionType_Door);
+            if (floor.mHit)
+                surface = std::max(surface, floor.mHitPos.z());
+        }
+
+        if (surface > bottom)
+            object.moveBy(osg::Vec3f(0, 0, surface - bottom + 1.f));
     }
 
     void PhysicsSystem::remove(const MWWorld::Ptr& ptr)
@@ -645,6 +676,8 @@ namespace MWPhysics
             if (mMovingDynamicObjects && foundObject->second->isDynamic())
                 return;
             foundObject->second->updatePosition();
+            if (foundObject->second->isDynamic())
+                placeOnSurface(*foundObject->second);
             mTaskScheduler->updateSingleAabb(foundObject->second);
         }
         else if (auto foundActor = mActors.find(ptr.mRef); foundActor != mActors.end())
@@ -961,6 +994,7 @@ namespace MWPhysics
         mWaterCollisionObject = std::make_unique<btCollisionObject>();
         mWaterCollisionShape = std::make_unique<btStaticPlaneShape>(btVector3(0, 0, 1), mWaterHeight);
         mWaterCollisionObject->setCollisionShape(mWaterCollisionShape.get());
+        mWaterCollisionObject->setCollisionFlags(btCollisionObject::CF_STATIC_OBJECT);
         mTaskScheduler->addCollisionObject(
             mWaterCollisionObject.get(), CollisionType_Water, CollisionType_Actor | CollisionType_Projectile);
     }

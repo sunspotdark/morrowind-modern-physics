@@ -150,6 +150,22 @@ namespace MWPhysics
         mTaskScheduler->removeCollisionObject(mCollisionObject.get());
     }
 
+    float Object::getDynamicShapeBottom() const
+    {
+        const btTransform centerOfMass = getTransform() * btTransform(btQuaternion::getIdentity(), mCenterOffset);
+        btVector3 aabbMin;
+        btVector3 aabbMax;
+        mDynamicShape->getAabb(centerOfMass, aabbMin, aabbMax);
+        return static_cast<float>(aabbMin.z());
+    }
+
+    void Object::moveBy(const osg::Vec3f& offset)
+    {
+        std::unique_lock<std::mutex> lock(mPositionMutex);
+        mPosition += offset;
+        mTransformUpdatePending = true;
+    }
+
     std::optional<std::pair<osg::Vec3f, osg::Quat>> Object::takeSimulatedTransform()
     {
         if (mMotionState == nullptr)
@@ -217,7 +233,8 @@ namespace MWPhysics
                 mRigidBody->setInterpolationLinearVelocity(btVector3(0, 0, 0));
                 mRigidBody->setInterpolationAngularVelocity(btVector3(0, 0, 0));
                 mRigidBody->clearForces();
-                mMotionState->reset(centerOfMass);
+                // Marks the transform as changed, so the game object follows if the move came from moveBy.
+                mMotionState->setWorldTransform(centerOfMass);
                 mRigidBody->activate(true);
             }
             else

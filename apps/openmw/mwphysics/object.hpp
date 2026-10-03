@@ -49,6 +49,12 @@ namespace MWPhysics
         /// new position and rotation of the object's origin (as opposed to its center of mass).
         std::optional<std::pair<osg::Vec3f, osg::Quat>> takeSimulatedTransform();
 
+        /// For dynamic objects: world-space height of the lowest point of the simulated shape.
+        float getDynamicShapeBottom() const;
+
+        /// Move the object; takes effect on the next commitPositionChange.
+        void moveBy(const osg::Vec3f& offset);
+
         const std::shared_ptr<Resource::BulletShapeInstance>& getShapeInstance() const;
         void setScale(float scale);
         void setRotation(osg::Quat quat);

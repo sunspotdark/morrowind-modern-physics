@@ -86,8 +86,9 @@ namespace MWPhysics
         mCollisionObject = std::make_unique<btCollisionObject>();
         mCollisionObject->setCollisionShape(mShape.get());
         mCollisionObject->setWorldTransform(transform);
-        mTaskScheduler->addCollisionObject(
-            mCollisionObject.get(), CollisionType_HeightMap, CollisionType_Actor | CollisionType_Projectile);
+        mCollisionObject->setCollisionFlags(btCollisionObject::CF_STATIC_OBJECT);
+        mTaskScheduler->addCollisionObject(mCollisionObject.get(), CollisionType_HeightMap,
+            CollisionType_Actor | CollisionType_Projectile | CollisionType_Dynamic);
     }
 
     HeightField::~HeightField()
