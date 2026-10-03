@@ -1406,6 +1406,35 @@ namespace MWWorld
         return mPhysics->isHoldingObject();
     }
 
+    void World::pushObjectsFromExplosion(const osg::Vec3f& center, float radius)
+    {
+        mPhysics->explode(center, radius, 600.f);
+    }
+
+    void World::knockObjectInMeleeReach(const MWWorld::Ptr& attacker, float reach)
+    {
+        // Swing along the view for the player, along the facing direction for everyone else.
+        const ESM::Position& position = attacker.getRefData().getPosition();
+        const osg::Vec3f eye
+            = position.asVec3() + osg::Vec3f(0, 0, mPhysics->getHalfExtents(attacker).z() * 2.f * 0.85f);
+        osg::Vec3f direction = attacker == getPlayerPtr()
+            ? mRendering->getCamera()->getOrient() * osg::Vec3f(0, 1, 0)
+            : osg::Quat(position.rot[2], osg::Vec3f(0, 0, -1)) * osg::Vec3f(0, 1, 0);
+        direction.normalize();
+
+        // The first thing in the way, so items behind walls (or behind furniture) are safe.
+        const MWPhysics::RayCastingResult hit = mPhysics->castSphere(eye, eye + direction * reach, 10.f,
+            MWPhysics::CollisionType_DynamicSupport | MWPhysics::CollisionType_Dynamic,
+            MWPhysics::CollisionType_Dynamic);
+        if (!hit.mHit || hit.mHitObject.isEmpty() || !hit.mHitObject.getClass().isItem(hit.mHitObject))
+            return;
+
+        osg::Vec3f knock = direction;
+        knock.z() += 0.2f;
+        knock.normalize();
+        mPhysics->strikeObject(hit.mHitObject, knock * 500.f, hit.mHitPos, eye);
+    }
+
     void World::doPhysics(float duration, osg::Timer_t frameStart, unsigned int frameNumber, osg::Stats& stats)
     {
         if (mPhysics->isHoldingObject())

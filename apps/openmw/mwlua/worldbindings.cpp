@@ -298,6 +298,15 @@ namespace MWLua
                 return MWBase::Environment::get().getESMStore()->insert(light);
             });
 
+        // Physics fork: blow simulated objects away from a spell explosion (called by the built-in spellcasting).
+        api["_pushObjectsFromExplosion"] = [context](const osg::Vec3f& position, const Misc::FiniteFloat radius) {
+            context.mLuaManager->addAction(
+                [position, radius = static_cast<float>(radius)] {
+                    MWBase::Environment::get().getWorld()->pushObjectsFromExplosion(position, radius);
+                },
+                "_pushObjectsFromExplosion");
+        };
+
         api["_runStandardActivationAction"] = [context](const GObject& object, const GObject& actor) {
             if (!object.ptr().getRefData().activate())
                 return;

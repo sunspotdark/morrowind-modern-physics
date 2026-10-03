@@ -107,8 +107,11 @@ namespace
     {
         bool needBroadphaseCollision(btBroadphaseProxy* proxy0, btBroadphaseProxy* proxy1) const override
         {
-            if (((proxy0->m_collisionFilterGroup | proxy1->m_collisionFilterGroup) & MWPhysics::CollisionType_Dynamic)
-                == 0)
+            const int groups = proxy0->m_collisionFilterGroup | proxy1->m_collisionFilterGroup;
+            if ((groups & MWPhysics::CollisionType_Dynamic) == 0)
+                return false;
+            // Projectiles find what they hit with their own sweep test; they're not solid to the simulation.
+            if ((groups & MWPhysics::CollisionType_Projectile) != 0)
                 return false;
             return (proxy0->m_collisionFilterGroup & proxy1->m_collisionFilterMask) != 0
                 && (proxy1->m_collisionFilterGroup & proxy0->m_collisionFilterMask) != 0;
@@ -245,6 +248,11 @@ namespace
 
 namespace MWPhysics
 {
+    osg::Vec3f quatToEsmRotation(const osg::Quat& quat)
+    {
+        return toEsmRotation(quat);
+    }
+
     PhysicsSystem::PhysicsSystem(Resource::ResourceSystem* resourceSystem, osg::ref_ptr<osg::Group> parentNode)
         : mPhysicsDt(1.f / 60.f)
         , mShapeManager(std::make_unique<Resource::BulletShapeManager>(resourceSystem->getVFS(),
@@ -737,6 +745,40 @@ namespace MWPhysics
     bool PhysicsSystem::isHoldingObject() const
     {
         return mTaskScheduler->getHeldObject() != nullptr;
+    }
+
+    bool PhysicsSystem::strikeObject(const MWWorld::Ptr& ptr, const osg::Vec3f& velocityChange,
+        const osg::Vec3f& point, const osg::Vec3f& source)
+    {
+        const auto found = mObjects.find(ptr.mRef);
+        if (found == mObjects.end() || !found->second->isDynamic())
+            return false;
+        mTaskScheduler->strikeObjects({ { found->second, Misc::Convert::toBullet(velocityChange),
+            Misc::Convert::toBullet(point), Misc::Convert::toBullet(source) } });
+        return true;
+    }
+
+    void PhysicsSystem::explode(const osg::Vec3f& center, float radius, float speed)
+    {
+        if (radius <= 0)
+            return;
+        std::vector<PhysicsTaskScheduler::Strike> strikes;
+        for (const std::shared_ptr<Object>& object : mDynamicObjects)
+        {
+            const osg::Vec3f position = Misc::Convert::toOsg(object->getCenterOfMassTransform().getOrigin());
+            osg::Vec3f away = position - center;
+            const float distance = away.normalize();
+            if (distance >= radius)
+                continue;
+            // Mostly outwards, a bit upwards, so things on the floor get tossed rather than slid.
+            away.z() += 0.5f;
+            away.normalize();
+            const float falloff = 1.f - distance / radius;
+            strikes.push_back({ object, Misc::Convert::toBullet(away * (speed * falloff)),
+                object->getCenterOfMassTransform().getOrigin(), Misc::Convert::toBullet(center) });
+        }
+        if (!strikes.empty())
+            mTaskScheduler->strikeObjects(strikes);
     }
 
     void PhysicsSystem::placeOnSurface(Object& object)

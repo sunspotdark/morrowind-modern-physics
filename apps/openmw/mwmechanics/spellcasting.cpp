@@ -80,6 +80,10 @@ namespace MWMechanics
                 world->spawnEffect(Misc::ResourceHelpers::correctMeshPath(areaStatic->mModel.getNormalized()), texture,
                     mHitPosition, static_cast<float>(effectInfo.mData.mArea * 2));
 
+            // The blast throws loose objects around.
+            world->pushObjectsFromExplosion(
+                mHitPosition, static_cast<float>(effectInfo.mData.mArea) * Constants::UnitsPerFoot);
+
             // Play explosion sound (make sure to use NoTrack, since we will delete the projectile now)
             {
                 MWBase::SoundManager* sndMgr = MWBase::Environment::get().getSoundManager();

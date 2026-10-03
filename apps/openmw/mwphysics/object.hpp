@@ -60,6 +60,8 @@ namespace MWPhysics
         std::pair<float, float> getDynamicShapeHeightRange() const;
         /// For dynamic objects: the simulated shape, and where it is for the object's current position.
         btCollisionShape* getDynamicShape() const { return mDynamicShape.get(); }
+        /// Statics this dynamic object passes through until it is clear of them. Collision world lock only.
+        std::vector<const btCollisionObject*>& getWedgedIn() { return mWedgedIn; }
         btTransform getCenterOfMassTransform() const;
 
         /// Move the object; takes effect on the next commitPositionChange.
@@ -108,6 +110,7 @@ namespace MWPhysics
         btRigidBody* mRigidBody = nullptr; // same object as mCollisionObject
         btVector3 mCenterOffset; // center of mass relative to object origin, in object space
         osg::Vec3f mPlacedPosition;
+        std::vector<const btCollisionObject*> mWedgedIn;
     };
 }
 

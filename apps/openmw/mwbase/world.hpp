@@ -302,6 +302,11 @@ namespace MWBase
         virtual void rotateGrabbedObject(float yaw, float pitch) = 0;
         /// Stops the player's weapon/spell use (e.g. so clicking to throw doesn't also attack).
         virtual void setPlayerAttackSuppressed(bool suppressed) = 0;
+
+        /// Blow simulated objects away from an area effect at center.
+        virtual void pushObjectsFromExplosion(const osg::Vec3f& center, float radius) = 0;
+        /// A melee attack that didn't hit anyone: knock a simulated object in reach, if any.
+        virtual void knockObjectInMeleeReach(const MWWorld::Ptr& attacker, float reach) = 0;
         virtual bool isPlayerAttackSuppressed() const = 0;
 
         virtual void rotateObject(

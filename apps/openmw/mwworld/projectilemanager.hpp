@@ -128,6 +128,7 @@ namespace MWWorld
         std::vector<ProjectileState> mProjectiles;
 
         void cleanupProjectile(ProjectileState& state);
+        void placeMissedProjectile(const ProjectileState& state, const osg::Vec3f& hitPosition);
         void cleanupMagicBolt(MagicBoltState& state);
         void periodicCleanup(float dt);
 

@@ -1,5 +1,6 @@
 #include "projectilemanager.hpp"
 
+#include <algorithm>
 #include <iomanip>
 #include <memory>
 #include <optional>
@@ -18,6 +19,7 @@
 #include <components/esm3/projectilestate.hpp>
 
 #include <components/esm/quaternion.hpp>
+#include <components/esm/util.hpp>
 #include <components/esm/vector3.hpp>
 
 #include <components/misc/constants.hpp>
@@ -569,8 +571,28 @@ namespace MWWorld
             if (projectile->getHitWater())
                 mRendering->emitWaterRipple(hitPosition);
 
-            MWMechanics::projectileHit(caster, target, bow, projectileRef.getPtr(), hitPosition,
+            const MWWorld::Ptr projectilePtr = projectileRef.getPtr();
+            const bool hitActor = !target.isEmpty() && target.getClass().isActor();
+
+            // A simulated item that was hit gets knocked, according to the momentum of the projectile.
+            if (!target.isEmpty() && !hitActor && target.getClass().isItem(target))
+            {
+                const float projectileMass = std::max(projectilePtr.getClass().getWeight(projectilePtr), 0.1f);
+                const float targetMass = std::clamp(target.getClass().getWeight(target), 0.2f, 50.f);
+                osg::Vec3f direction = projectileState.mVelocity;
+                direction.normalize();
+                mPhysics->strikeObject(target, projectileState.mVelocity * (projectileMass / targetMass),
+                    hitPosition, hitPosition - direction * 100.f);
+            }
+
+            MWMechanics::projectileHit(caster, target, bow, projectilePtr, hitPosition,
                 projectileState.mAttackStrength, projectileState.mAttackWindUp);
+
+            // Missed shots aren't lost: the arrow, bolt or thrown weapon lands where it hit and can be picked up.
+            // Enchanted ones are spent, their enchantment having gone off.
+            if (!hitActor && projectilePtr.getClass().getEnchantment(projectilePtr).empty())
+                placeMissedProjectile(projectileState, hitPosition);
+
             projectileState.mToDelete = true;
         }
 
@@ -608,6 +630,9 @@ namespace MWWorld
                 hitNormal = projectile->velocity();
                 hitNormal.normalize();
             }
+            // A spell bolt striking a simulated item knocks it back (area effects are handled by the explosion).
+            else if (!target.isEmpty() && !target.getClass().isActor() && target.getClass().isItem(target))
+                mPhysics->strikeObject(target, hitNormal * -300.f, hitPos, hitPos + hitNormal * 100.f);
             MWBase::Environment::get().getLuaManager()->magicProjectileHit(
                 magicBoltState.mSpellId, caster, magicBoltState.mItem, target, hitPos, hitNormal);
 
@@ -631,6 +656,34 @@ namespace MWWorld
         mMagicBolts.erase(
             std::remove_if(mMagicBolts.begin(), mMagicBolts.end(), [](const State& state) { return state.mToDelete; }),
             mMagicBolts.end());
+    }
+
+    void ProjectileManager::placeMissedProjectile(const ProjectileState& state, const osg::Vec3f& hitPosition)
+    {
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        MWWorld::CellStore* cell = world->getPlayerPtr().getCell();
+        if (cell == nullptr)
+            return;
+
+        osg::Vec3f direction = state.mVelocity;
+        direction.normalize();
+        // Back out of whatever it hit, so it doesn't start inside it.
+        const osg::Vec3f position = hitPosition - direction * 10.f;
+        if (cell->isExterior())
+            cell = &MWBase::Environment::get().getWorldModel()->getExterior(
+                ESM::positionToExteriorCellLocation(position.x(), position.y(), cell->getCell()->getWorldSpace()));
+
+        ESM::Position pos;
+        pos.pos[0] = position.x();
+        pos.pos[1] = position.y();
+        pos.pos[2] = position.z();
+        const osg::Vec3f rotation = MWPhysics::quatToEsmRotation(lookAt(state.mVelocity));
+        pos.rot[0] = rotation.x();
+        pos.rot[1] = rotation.y();
+        pos.rot[2] = rotation.z();
+
+        MWWorld::ManualRef ref(*MWBase::Environment::get().getESMStore(), state.mIdArrow, 1);
+        world->placeObject(ref.getPtr(), cell, pos);
     }
 
     void ProjectileManager::cleanupProjectile(ProjectileManager::ProjectileState& state)

@@ -213,6 +213,33 @@ namespace
         btScalar mMinDepth;
     };
 
+    // Finds a piece of furniture (a detailed furniture collision object) a body is resting on or in.
+    class FurnitureContactCallback final : public btCollisionWorld::ContactResultCallback
+    {
+    public:
+        explicit FurnitureContactCallback(const btCollisionObject* body)
+            : mBody(body)
+        {
+            m_collisionFilterGroup = MWPhysics::CollisionType_Dynamic;
+            m_collisionFilterMask = MWPhysics::CollisionType_DynamicDetail;
+            m_closestDistanceThreshold = 2.f; // resting counts, not just overlapping
+        }
+
+        btScalar addSingleResult(btManifoldPoint& /*cp*/, const btCollisionObjectWrapper* col0Wrap, int /*partId0*/,
+            int /*index0*/, const btCollisionObjectWrapper* col1Wrap, int /*partId1*/, int /*index1*/) override
+        {
+            if (mFurniture == nullptr)
+                mFurniture = col0Wrap->getCollisionObject() == mBody ? col1Wrap->getCollisionObject()
+                                                                      : col0Wrap->getCollisionObject();
+            return 0;
+        }
+
+        const btCollisionObject* mFurniture = nullptr;
+
+    private:
+        const btCollisionObject* mBody;
+    };
+
     osg::Vec3f interpolateMovements(const MWPhysics::PtrHolder& ptr, float timeAccum, float physicsDt)
     {
         const float interpolationFactor = std::clamp(timeAccum / physicsDt, 0.0f, 1.0f);
@@ -1024,20 +1051,25 @@ namespace MWPhysics
 
         // Locked object must outlive the collision world lock (its destructor takes the lock).
         std::shared_ptr<Object> held;
-        std::shared_ptr<Object> grabIgnoredBody;
         btVector3 holdTarget;
         btQuaternion holdTargetRotation;
         {
             std::lock_guard heldLock(mHeldObjectMutex);
             held = mHeldObject.lock();
-            grabIgnoredBody = mGrabIgnoredBody.lock();
             holdTarget = mHoldTarget;
             holdTargetRotation = mHoldTargetRotation;
+        }
+        std::vector<std::shared_ptr<Object>> wedged;
+        {
+            std::lock_guard wedgedLock(mWedgedObjectsMutex);
+            for (const std::weak_ptr<Object>& object : mWedgedObjects)
+                if (std::shared_ptr<Object> locked = object.lock())
+                    wedged.push_back(std::move(locked));
         }
 
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
 
-        updateGrabIgnoredObjects(grabIgnoredBody.get());
+        updateWedgedObjects(wedged);
 
         if (held != nullptr)
         {
@@ -1082,29 +1114,14 @@ namespace MWPhysics
     void PhysicsTaskScheduler::holdObject(const std::shared_ptr<Object>& object)
     {
         releaseHeldObject(std::nullopt);
-        // Locked object must outlive the collision world lock (its destructor takes the lock).
-        std::shared_ptr<Object> previousGrabIgnoredBody;
-        {
-            std::lock_guard heldLock(mHeldObjectMutex);
-            previousGrabIgnoredBody = mGrabIgnoredBody.lock();
-        }
 
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
         btRigidBody& body = *object->getRigidBody();
         body.setActivationState(DISABLE_DEACTIVATION);
         body.setGravity(btVector3(0, 0, 0));
-
-        // Placed items often sit partly inside what they rest on (books in shelves), which would wedge them in
-        // place. Let the item pass through whatever it is stuck in until it is clear of it.
-        clearGrabIgnoredObjects(previousGrabIgnoredBody.get());
-        PenetrationCallback penetrating(&body, 0.5f);
-        ContactTestWrapper::contactTest(mCollisionWorld, &body, penetrating);
-        for (const btCollisionObject* other : penetrating.mOthers)
-            body.setIgnoreCollisionCheck(other, true);
-        mGrabIgnoredObjects = std::move(penetrating.mOthers);
+        freeWedgedObjectUnsafe(object);
 
         std::lock_guard heldLock(mHeldObjectMutex);
-        mGrabIgnoredBody = object;
         mHeldObject = object;
         mHoldTarget = body.getCenterOfMassPosition();
         mHoldTargetRotation = body.getOrientation();
@@ -1147,38 +1164,106 @@ namespace MWPhysics
         }
     }
 
-    void PhysicsTaskScheduler::updateGrabIgnoredObjects(Object* object)
+    void PhysicsTaskScheduler::freeWedgedObjectUnsafe(const std::shared_ptr<Object>& object)
     {
-        // Called with the collision world locked. object is mGrabIgnoredBody, locked by the caller beforehand.
-        if (mGrabIgnoredObjects.empty())
-            return;
-        if (object == nullptr)
-        {
-            mGrabIgnoredObjects.clear();
-            return;
-        }
+        // Placed items often sit partly inside what they rest on (books in shelves), which wedges them in place
+        // once they are grabbed or struck. Let the item pass through whatever it is stuck in until it is clear.
         btRigidBody& body = *object->getRigidBody();
-        std::erase_if(mGrabIgnoredObjects, [&](const btCollisionObject* other) {
-            // Static objects can be unloaded in the meantime; only touch ones still in the world.
-            if (mCollisionObjects.find(other) == mCollisionObjects.end())
+        PenetrationCallback penetrating(&body, 0.5f);
+        ContactTestWrapper::contactTest(mCollisionWorld, &body, penetrating);
+        std::vector<const btCollisionObject*>& wedgedIn = object->getWedgedIn();
+        for (const btCollisionObject* other : penetrating.mOthers)
+        {
+            if (std::find(wedgedIn.begin(), wedgedIn.end(), other) != wedgedIn.end())
+                continue;
+            body.setIgnoreCollisionCheck(other, true);
+            wedgedIn.push_back(other);
+        }
+        if (wedgedIn.empty())
+            return;
+
+        // Note: no weak_ptr::lock() while the collision world is locked (see stepDynamics).
+        std::lock_guard wedgedLock(mWedgedObjectsMutex);
+        const bool tracked
+            = std::any_of(mWedgedObjects.begin(), mWedgedObjects.end(), [&](const std::weak_ptr<Object>& tracked) {
+                  return !tracked.owner_before(object) && !object.owner_before(tracked);
+              });
+        if (!tracked)
+            mWedgedObjects.push_back(object);
+    }
+
+    void PhysicsTaskScheduler::updateWedgedObjects(const std::vector<std::shared_ptr<Object>>& objects)
+    {
+        // Called with the collision world locked; the caller keeps the objects alive until it is unlocked.
+        if (objects.empty())
+            return;
+        for (const std::shared_ptr<Object>& object : objects)
+        {
+            btRigidBody& body = *object->getRigidBody();
+            std::erase_if(object->getWedgedIn(), [&](const btCollisionObject* other) {
+                // Static objects can be unloaded in the meantime; only touch ones still in the world.
+                if (mCollisionObjects.find(other) == mCollisionObjects.end())
+                    return true;
+                PenetrationCallback overlap(&body, 0.f);
+                ContactTestWrapper::contactPairTest(
+                    mCollisionWorld, &body, const_cast<btCollisionObject*>(other), overlap);
+                if (!overlap.mOthers.empty())
+                    return false;
+                body.setIgnoreCollisionCheck(other, false);
                 return true;
-            PenetrationCallback overlap(&body, 0.f);
-            ContactTestWrapper::contactPairTest(
-                mCollisionWorld, &body, const_cast<btCollisionObject*>(other), overlap);
-            if (!overlap.mOthers.empty())
-                return false;
-            body.setIgnoreCollisionCheck(other, false);
-            return true;
+            });
+        }
+
+        // Note: no weak_ptr::lock() while the collision world is locked (see stepDynamics).
+        std::lock_guard wedgedLock(mWedgedObjectsMutex);
+        std::erase_if(mWedgedObjects, [&](const std::weak_ptr<Object>& tracked) {
+            if (tracked.expired())
+                return true;
+            const auto found = std::find_if(objects.begin(), objects.end(), [&](const std::shared_ptr<Object>& o) {
+                return !tracked.owner_before(o) && !o.owner_before(tracked);
+            });
+            return found != objects.end() && (*found)->getWedgedIn().empty();
         });
     }
 
-    void PhysicsTaskScheduler::clearGrabIgnoredObjects(Object* object)
+    void PhysicsTaskScheduler::strikeObjects(const std::vector<Strike>& strikes)
     {
-        // Called with the collision world locked. object is mGrabIgnoredBody, locked by the caller beforehand.
-        if (object != nullptr)
-            for (const btCollisionObject* other : mGrabIgnoredObjects)
-                object->getRigidBody()->setIgnoreCollisionCheck(other, false);
-        mGrabIgnoredObjects.clear();
+        // The strikes hold the objects, so none can be destroyed while the collision world is locked.
+        const std::shared_ptr<Object> held = getHeldObject();
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        for (const Strike& strike : strikes)
+        {
+            if (strike.mObject == held)
+                continue;
+            btRigidBody& body = *strike.mObject->getRigidBody();
+            body.activate(true);
+            body.applyImpulse(
+                strike.mVelocityChange / body.getInvMass(), strike.mPoint - body.getCenterOfMassPosition());
+            // Knock it out of the shelf it is wedged in, like grabbing it would.
+            freeWedgedObjectUnsafe(strike.mObject);
+
+            // Things sitting in furniture (books in a bookcase) would mostly be driven into it and stay. Pop them
+            // out towards the side the blow came from, which for shelves is the open front.
+            FurnitureContactCallback furniture(&body);
+            ContactTestWrapper::contactTest(mCollisionWorld, &body, furniture);
+            if (furniture.mFurniture != nullptr)
+            {
+                btVector3 aabbMin;
+                btVector3 aabbMax;
+                furniture.mFurniture->getCollisionShape()->getAabb(
+                    furniture.mFurniture->getWorldTransform(), aabbMin, aabbMax);
+                btVector3 out = strike.mSource - (aabbMin + aabbMax) * 0.5;
+                out.setZ(0);
+                if (out.length2() > 1e-4f)
+                {
+                    out.normalize();
+                    constexpr btScalar popOutSpeed = 500.f;
+                    constexpr btScalar popUpSpeed = 200.f;
+                    body.applyCentralImpulse(
+                        (out * popOutSpeed + btVector3(0, 0, popUpSpeed)) / body.getInvMass());
+                }
+            }
+        }
     }
 
     std::shared_ptr<Object> PhysicsTaskScheduler::getHeldObject() const

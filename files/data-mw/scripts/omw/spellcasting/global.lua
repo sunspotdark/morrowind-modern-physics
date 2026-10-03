@@ -57,6 +57,9 @@ local function explodeEffect(position, effect)
 
     local areaSound = mgef.areaSound or core.stats.Skill.records[mgef.school].school.areaSound
     core.sendGlobalEvent('PlaySound3d', {sound = areaSound, position = position})
+
+    -- The blast throws loose objects around.
+    world._pushObjectsFromExplosion(position, effect.area * common.UnitsPerFoot)
 end
 
 local function explodeSpell(spellCast, options)

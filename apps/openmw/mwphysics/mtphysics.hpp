@@ -77,6 +77,17 @@ namespace MWPhysics
         /// Let go of the held object, optionally setting its velocity (for throwing).
         void releaseHeldObject(const std::optional<btVector3>& velocity);
         std::shared_ptr<Object> getHeldObject() const;
+
+        /// Change the velocity of dynamic objects as if struck at a world point (velocityChange is independent
+        /// of the object's mass). Ignores the held object.
+        struct Strike
+        {
+            std::shared_ptr<Object> mObject;
+            btVector3 mVelocityChange;
+            btVector3 mPoint;
+            btVector3 mSource; // where the blow came from
+        };
+        void strikeObjects(const std::vector<Strike>& strikes);
         void removeCollisionObject(btCollisionObject* collisionObject);
         void updateSingleAabb(const std::shared_ptr<PtrHolder>& ptr, bool immediate = false);
         bool getLineOfSight(const std::shared_ptr<Actor>& actor1, const std::shared_ptr<Actor>& actor2);
@@ -103,8 +114,8 @@ namespace MWPhysics
         void pushDynamicObjects();
         void stepDynamics();
         void releaseHeldObjectUnsafe(btRigidBody& body, const std::optional<btVector3>& velocity);
-        void updateGrabIgnoredObjects(Object* object);
-        void clearGrabIgnoredObjects(Object* object);
+        void freeWedgedObjectUnsafe(const std::shared_ptr<Object>& object);
+        void updateWedgedObjects(const std::vector<std::shared_ptr<Object>>& objects);
         void syncWithMainThread();
         void waitForWorkers();
         void prepareWork(float& timeAccum, std::vector<Simulation>& simulations, osg::Timer_t frameStart,
@@ -122,9 +133,9 @@ namespace MWPhysics
         std::weak_ptr<Object> mHeldObject;
         btVector3 mHoldTarget;
         btQuaternion mHoldTargetRotation;
-        // Static objects the last grabbed object was stuck in when grabbed; it ignores them until clear of them.
-        std::weak_ptr<Object> mGrabIgnoredBody;
-        std::vector<const btCollisionObject*> mGrabIgnoredObjects;
+        // Dynamic objects passing through statics they were wedged in (see freeWedgedObjectUnsafe).
+        std::vector<std::weak_ptr<Object>> mWedgedObjects;
+        std::mutex mWedgedObjectsMutex;
         mutable std::mutex mHeldObjectMutex;
         MWRender::DebugDrawer* mDebugDrawer;
         std::vector<LOSRequest> mLOSCache;

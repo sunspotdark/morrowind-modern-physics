@@ -458,7 +458,7 @@ namespace MWPhysics
 
         ProjectileConvexCallback resultCallback(
             projectile.mCaster, projectile.mCollisionObject, btFrom, btTo, *projectile.mProjectile);
-        resultCallback.m_collisionFilterMask = CollisionType_AnyPhysical;
+        resultCallback.m_collisionFilterMask = CollisionType_AnyPhysical | CollisionType_Dynamic;
         resultCallback.m_collisionFilterGroup = CollisionType_Projectile;
 
         const btQuaternion btrot = btQuaternion::getIdentity();

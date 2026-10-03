@@ -163,7 +163,7 @@ namespace MWPhysics
         mCollisionObject = std::move(body);
 
         mTaskScheduler->addRigidBody(mRigidBody, CollisionType_Dynamic,
-            CollisionType_DynamicSupport | CollisionType_Actor | CollisionType_Dynamic);
+            CollisionType_DynamicSupport | CollisionType_Actor | CollisionType_Dynamic | CollisionType_Projectile);
     }
 
     Object::~Object()

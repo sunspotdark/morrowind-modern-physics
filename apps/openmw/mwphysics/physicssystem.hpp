@@ -74,6 +74,9 @@ namespace MWPhysics
 
     using ActorMap = std::unordered_map<const MWWorld::LiveCellRefBase*, std::shared_ptr<Actor>>;
 
+    /// Inverse of Misc::Convert::makeOsgQuat: the ESM rotation (x, y, z) of an object with this orientation.
+    osg::Vec3f quatToEsmRotation(const osg::Quat& quat);
+
     struct ContactPoint
     {
         MWWorld::Ptr mObject;
@@ -190,6 +193,13 @@ namespace MWPhysics
         /// Drop the held object, or throw it along direction (normalized).
         void releaseHeldObject(bool throwObject, const osg::Vec3f& direction);
         bool isHoldingObject() const;
+
+        /// If ptr is a simulated object, change its velocity by velocityChange as if struck at point by a blow coming
+        /// from source. Returns whether it was.
+        bool strikeObject(const MWWorld::Ptr& ptr, const osg::Vec3f& velocityChange, const osg::Vec3f& point,
+            const osg::Vec3f& source);
+        /// Push simulated objects away from center, up to speed at the center and nothing at radius.
+        void explode(const osg::Vec3f& center, float radius, float speed);
         void addActor(const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh);
 
         int addProjectile(
