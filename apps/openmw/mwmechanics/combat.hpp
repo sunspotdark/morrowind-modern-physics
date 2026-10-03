@@ -33,7 +33,8 @@ namespace MWMechanics
 
     /// @note for a thrown weapon, \a weapon == \a projectile, for bows/crossbows, \a projectile is the arrow/bolt
     /// @note \a victim may be empty (e.g. for a hit on terrain), a non-actor (environment objects) or an actor
-    void projectileHit(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim, MWWorld::Ptr weapon,
+    /// @return whether an actor was hit (rather than missed, or not an actor at all)
+    bool projectileHit(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim, MWWorld::Ptr weapon,
         const MWWorld::Ptr& projectile, const osg::Vec3f& hitPosition, float attackStrength, float attackWindUp);
 
     /// Get the chance (in percent) for \a attacker to successfully hit \a victim with a given weapon skill value

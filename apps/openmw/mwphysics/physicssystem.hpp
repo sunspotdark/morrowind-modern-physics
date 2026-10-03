@@ -194,8 +194,8 @@ namespace MWPhysics
         /// A simulated object was just created in the world (dropped, spawned): settle it onto the surface and
         /// let it fall. Objects loaded with a cell stay asleep where they were.
         void wakeNewObject(const MWWorld::Ptr& ptr);
-        /// Fix a simulated object, asleep, exactly where the game object is (an arrow stuck in a wall).
-        void stickObject(const MWWorld::Ptr& ptr);
+        /// Fix a simulated object, asleep, with its tip driven into hitPoint (an arrow stuck in a wall).
+        void stickObject(const MWWorld::Ptr& ptr, const osg::Vec3f& hitPoint);
         /// Set a simulated object moving.
         void launchObject(const MWWorld::Ptr& ptr, const osg::Vec3f& velocity);
 

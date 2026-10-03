@@ -681,14 +681,25 @@ namespace MWPhysics
         mTaskScheduler->updateSingleAabb(found->second);
     }
 
-    void PhysicsSystem::stickObject(const MWWorld::Ptr& ptr)
+    void PhysicsSystem::stickObject(const MWWorld::Ptr& ptr, const osg::Vec3f& hitPoint)
     {
         const auto found = mObjects.find(ptr.mRef);
         if (found == mObjects.end() || !found->second->isDynamic())
             return;
-        // Exactly where the game object is (no placing on surfaces: it's meant to be embedded), and asleep.
-        found->second->updatePosition();
-        found->second->requestSleep();
+        Object& object = *found->second;
+
+        // Put the tip (the far end along the object's Y axis, which points where it flew) a fifth of the
+        // object's length past the hit point, whatever the model's origin is.
+        const auto [back, tip] = object.getDynamicShapeYRange();
+        const float depth = std::clamp((tip - back) * 0.2f, 4.f, 12.f);
+        const btQuaternion rotation = object.getTransform().getRotation();
+        const osg::Vec3f forward = Misc::Convert::toOsg(btMatrix3x3(rotation) * btVector3(0, 1, 0));
+        const osg::Vec3f origin = hitPoint + forward * depth - forward * tip;
+        MWBase::Environment::get().getWorld()->moveObject(ptr, origin, false, false);
+
+        // Exactly there (no placing on surfaces: it's meant to be embedded), and asleep.
+        object.updatePosition();
+        object.requestSleep();
         mTaskScheduler->updateSingleAabb(found->second);
     }
 

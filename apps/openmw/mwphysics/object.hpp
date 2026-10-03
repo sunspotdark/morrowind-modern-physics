@@ -67,6 +67,9 @@ namespace MWPhysics
         /// Statics this dynamic object passes through until it is clear of them. Collision world lock only.
         std::vector<const btCollisionObject*>& getWedgedIn() { return mWedgedIn; }
         btTransform getCenterOfMassTransform() const;
+        /// For dynamic objects: the extent of the simulated shape along the object's own Y axis (the direction
+        /// a projectile model points), relative to the object origin.
+        std::pair<float, float> getDynamicShapeYRange() const;
 
         /// Move the object; takes effect on the next commitPositionChange.
         void moveBy(const osg::Vec3f& offset);

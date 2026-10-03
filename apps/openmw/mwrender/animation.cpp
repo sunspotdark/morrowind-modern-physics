@@ -4,6 +4,7 @@
 #include <limits>
 
 #include <osg/BlendFunc>
+#include <osg/ComputeBoundsVisitor>
 #include <osg/Matrix>
 #include <osg/MatrixTransform>
 #include <osg/Switch>
@@ -1049,6 +1050,70 @@ namespace MWRender
     void Animation::setTextKeyListener(TextKeyListener* listener)
     {
         mTextKeyListener = listener;
+    }
+
+    void Animation::attachStuckProjectile(
+        VFS::Path::NormalizedView model, const osg::Vec3f& hitPosition, const osg::Vec3f& direction)
+    {
+        // The hit was on the actor's collision box, which is bigger than the body. Find the bone closest to
+        // the line the projectile was flying along, inside the box, and stick it in there.
+        constexpr float searchDepth = 80.f;
+        osg::MatrixTransform* bone = nullptr;
+        osg::Matrixf boneToWorld;
+        osg::Vec3f tipPosition;
+        float closest = std::numeric_limits<float>::max();
+        for (const auto& [name, node] : getNodeMap())
+        {
+            const osg::NodePathList paths = node->getParentalNodePaths();
+            if (paths.empty())
+                continue;
+            const osg::Matrixf toWorld = osg::computeLocalToWorld(paths.front());
+            const osg::Vec3f bonePosition = toWorld.getTrans();
+            const float along = std::clamp((bonePosition - hitPosition) * direction, 0.f, searchDepth);
+            const osg::Vec3f onLine = hitPosition + direction * along;
+            const float distance = (bonePosition - onLine).length2();
+            if (distance < closest)
+            {
+                closest = distance;
+                bone = node.get();
+                boneToWorld = toWorld;
+                tipPosition = onLine;
+            }
+        }
+        if (bone == nullptr)
+            return;
+
+        osg::ref_ptr<osg::Node> projectile = mResourceSystem->getSceneManager()->getInstance(model);
+        // Its tip is the far end along its Y axis, the direction projectile models point.
+        osg::ComputeBoundsVisitor computeBounds;
+        projectile->accept(computeBounds);
+        const float tip = computeBounds.getBoundingBox().valid() ? computeBounds.getBoundingBox().yMax() : 0.f;
+
+        // Same orientation as in flight: Y along the direction, no roll.
+        osg::Vec3f right = direction ^ osg::Z_AXIS;
+        if (right.normalize() < 1e-4f)
+            right = osg::X_AXIS;
+        const osg::Vec3f up = right ^ direction;
+        const osg::Matrixf rotation(right.x(), right.y(), right.z(), 0.f, direction.x(), direction.y(),
+            direction.z(), 0.f, up.x(), up.y(), up.z(), 0.f, 0.f, 0.f, 0.f, 1.f);
+        constexpr float embed = 3.f;
+        const osg::Vec3f origin = tipPosition + direction * embed - direction * tip;
+        const osg::Matrixf projectileToWorld = rotation * osg::Matrixf::translate(origin);
+
+        osg::ref_ptr<osg::MatrixTransform> attached = new osg::MatrixTransform(
+            projectileToWorld * osg::Matrixf::inverse(boneToWorld));
+        attached->addChild(projectile);
+        bone->addChild(attached);
+        mStuckProjectiles.emplace_back(bone, attached);
+
+        constexpr size_t maxStuckProjectiles = 8;
+        while (mStuckProjectiles.size() > maxStuckProjectiles)
+        {
+            const auto& [parent, node] = mStuckProjectiles.front();
+            if (osg::ref_ptr<osg::Group> group; parent.lock(group))
+                group->removeChild(node);
+            mStuckProjectiles.pop_front();
+        }
     }
 
     const Animation::NodeMap& Animation::getNodeMap() const

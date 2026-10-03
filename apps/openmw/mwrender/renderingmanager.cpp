@@ -2,6 +2,8 @@
 
 #include <cstdlib>
 
+#include <osg/Image>
+#include <osg/Texture>
 #include <osg/ClipControl>
 #include <osg/ComputeBoundsVisitor>
 #include <osg/Group>
@@ -1046,6 +1048,49 @@ namespace MWRender
         mRootNode->accept(*visitor);
 
         return getIntersectionResult(intersector, mIntersectionVisitor, ignoreList);
+    }
+
+    RenderingManager::SurfaceResult RenderingManager::castRayForSurface(
+        const osg::Vec3f& origin, const osg::Vec3f& dest)
+    {
+        osg::ref_ptr<osgUtil::LineSegmentIntersector> intersector(
+            new osgUtil::LineSegmentIntersector(osgUtil::LineSegmentIntersector::MODEL, origin, dest));
+        intersector->setIntersectionLimit(osgUtil::LineSegmentIntersector::LIMIT_NEAREST);
+        osg::ref_ptr<osgUtil::IntersectionVisitor> visitor = getIntersectionVisitor(intersector, true, true, false);
+        visitor->setReferenceEyePoint(origin);
+        visitor->setReferenceEyePointCoordinateFrame(osgUtil::Intersector::MODEL);
+        mRootNode->accept(*visitor);
+
+        SurfaceResult result;
+        if (!intersector->containsIntersections())
+            return result;
+        const osgUtil::LineSegmentIntersector::Intersection& intersection = intersector->getFirstIntersection();
+        result.mHit = true;
+        for (const osg::Node* node : intersection.nodePath)
+            if (node->getNodeMask() & Mask_Terrain)
+                result.mTerrain = true;
+
+        // The base texture, looking from the drawable up towards the root, as rendering would apply it.
+        const auto findTexture = [](const osg::StateSet* stateSet) -> std::string {
+            if (stateSet == nullptr)
+                return {};
+            for (unsigned int unit = 0; unit < stateSet->getTextureAttributeList().size(); ++unit)
+            {
+                const auto* texture = dynamic_cast<const osg::Texture*>(
+                    stateSet->getTextureAttribute(unit, osg::StateAttribute::TEXTURE));
+                if (texture == nullptr || texture->getNumImages() == 0 || texture->getImage(0) == nullptr)
+                    continue;
+                // Prefer the diffuse map over detail, glow or other maps.
+                if (unit == 0 || texture->getName() == "diffuseMap")
+                    return texture->getImage(0)->getFileName();
+            }
+            return {};
+        };
+        result.mTexture = findTexture(intersection.drawable->getStateSet());
+        for (auto it = intersection.nodePath.rbegin(); result.mTexture.empty() && it != intersection.nodePath.rend();
+             ++it)
+            result.mTexture = findTexture((*it)->getStateSet());
+        return result;
     }
 
     RenderingManager::RayResult RenderingManager::castCameraToViewportRay(

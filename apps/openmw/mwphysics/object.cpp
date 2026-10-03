@@ -205,6 +205,16 @@ namespace MWPhysics
         return getTransform() * btTransform(btQuaternion::getIdentity(), mCenterOffset);
     }
 
+    std::pair<float, float> Object::getDynamicShapeYRange() const
+    {
+        btVector3 aabbMin;
+        btVector3 aabbMax;
+        mDynamicShape->getAabb(btTransform::getIdentity(), aabbMin, aabbMax);
+        // The shape is centered on the center of mass, which sits at mCenterOffset from the origin.
+        return { static_cast<float>(aabbMin.y() + mCenterOffset.y()),
+            static_cast<float>(aabbMax.y() + mCenterOffset.y()) };
+    }
+
     std::pair<float, float> Object::getDynamicShapeHeightRange() const
     {
         btVector3 aabbMin;

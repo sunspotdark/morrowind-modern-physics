@@ -17,6 +17,9 @@
 #include <components/sceneutil/util.hpp>
 #include <components/vfs/pathutil.hpp>
 
+#include <osg/observer_ptr>
+
+#include <deque>
 #include <map>
 #include <optional>
 #include <span>
@@ -216,6 +219,9 @@ namespace MWRender
 
         mutable NodeMap mNodeMap;
         mutable bool mNodeMapCreated;
+
+        // Stuck projectiles: the bone each is attached to, and its node.
+        std::deque<std::pair<osg::observer_ptr<osg::Group>, osg::ref_ptr<osg::Node>>> mStuckProjectiles;
 
         MWWorld::Ptr mPtr;
 
@@ -457,6 +463,12 @@ namespace MWRender
         /// Return a node with the specified name, or nullptr if not existing.
         /// @note The matching is case-insensitive.
         const osg::Node* getNode(std::string_view name) const;
+
+        /// Show a projectile model stuck in the body: it flew along direction (normalized) and hit near hitPosition.
+        /// It is attached to the closest bone, so it moves with the body. Visual only; the oldest ones are removed
+        /// once there are too many.
+        void attachStuckProjectile(
+            VFS::Path::NormalizedView model, const osg::Vec3f& hitPosition, const osg::Vec3f& direction);
 
         MWWorld::MovementDirectionFlags getSupportedMovementDirections(
             std::span<const std::string_view> prefixes) const;

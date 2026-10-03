@@ -221,7 +221,7 @@ namespace MWMechanics
         }
     }
 
-    void projectileHit(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim, MWWorld::Ptr weapon,
+    bool projectileHit(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim, MWWorld::Ptr weapon,
         const MWWorld::Ptr& projectile, const osg::Vec3f& hitPosition, float attackStrength, float attackWindUp)
     {
         MWBase::World* world = MWBase::Environment::get().getWorld();
@@ -247,7 +247,7 @@ namespace MWMechanics
                     attackStrength, attackWindUp, damage, false, hitPosition, false,
                     MWMechanics::DamageSourceType::Ranged);
                 MWMechanics::reduceWeaponCondition(damage, false, weapon, attacker);
-                return;
+                return false;
             }
 
             {
@@ -311,6 +311,8 @@ namespace MWMechanics
             MWBase::Environment::get().getLuaManager()->onHit(attacker, victim, weapon, projectile, 0, attackStrength,
                 attackWindUp, damage, true, hitPosition, true, MWMechanics::DamageSourceType::Ranged);
         }
+
+        return validVictim;
     }
 
     float getHitChance(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim, int skillValue)

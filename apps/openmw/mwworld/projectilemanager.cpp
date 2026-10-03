@@ -25,6 +25,7 @@
 #include <components/misc/constants.hpp>
 #include <components/misc/convert.hpp>
 #include <components/misc/resourcehelpers.hpp>
+#include <components/misc/strings/lower.hpp>
 
 #include <components/resource/resourcesystem.hpp>
 #include <components/resource/scenemanager.hpp>
@@ -153,6 +154,34 @@ namespace
         lightDiffuseColor /= static_cast<float>(numberOfEffects);
 
         return lightDiffuseColor;
+    }
+
+    // Whether an arrow would stick in a surface (wood, plants, earth) or glance off it (stone, metal), judging by
+    // its texture and model names. Hard materials win when names mention both.
+    bool isSoftSurface(std::string_view texture, std::string_view model, bool unknownIsSoft)
+    {
+        static constexpr std::string_view hard[] = { "stone", "rock", "brick", "cobble", "marble", "granite", "slate",
+            "metal", "iron", "steel", "bronze", "silver", "gold", "dwrv", "dwem", "glass", "crystal", "tile", "plaster",
+            "stucco", "chitin", "bone", "shell", "pave", "ice", "lava", "velothi", "daed", "ruin" };
+        static constexpr std::string_view soft[] = { "wood", "wd_", "bark", "tree", "log", "plank", "board", "timber",
+            "branch", "root", "crate", "barrel", "basket", "wicker", "straw", "thatch", "hay", "fabric", "cloth",
+            "banner", "rug", "carpet", "tapestry", "rope", "leather", "hide", "fur", "mushroom", "shroom", "fung",
+            "flora", "moss", "dirt", "mud", "sand", "grass", "soil", "ground", "kelp" };
+        const auto classify = [](std::string_view name) -> std::optional<bool> {
+            const std::string lower = Misc::StringUtils::lowerCase(name);
+            for (const std::string_view word : hard)
+                if (lower.find(word) != std::string::npos)
+                    return false;
+            for (const std::string_view word : soft)
+                if (lower.find(word) != std::string::npos)
+                    return true;
+            return std::nullopt;
+        };
+        if (const std::optional<bool> fromTexture = classify(texture))
+            return *fromTexture;
+        if (const std::optional<bool> fromModel = classify(model))
+            return *fromModel;
+        return unknownIsSoft;
     }
 
     osg::Quat lookAt(const osg::Vec3f& pos)
@@ -585,20 +614,44 @@ namespace MWWorld
                     hitPosition, hitPosition - direction * 100.f);
             }
 
-            MWMechanics::projectileHit(caster, target, bow, projectilePtr, hitPosition,
+            const bool hitBody = MWMechanics::projectileHit(caster, target, bow, projectilePtr, hitPosition,
                 projectileState.mAttackStrength, projectileState.mAttackWindUp);
+
+            // A hit sticks in the body (not the player's: it would clutter the first person view).
+            if (hitBody && target != MWMechanics::getPlayer())
+            {
+                if (MWRender::Animation* animation = MWBase::Environment::get().getWorld()->getAnimation(target))
+                {
+                    osg::Vec3f direction = projectileState.mVelocity;
+                    direction.normalize();
+                    animation->attachStuckProjectile(
+                        projectilePtr.getClass().getCorrectedModel(projectilePtr), hitPosition, direction);
+                }
+            }
 
             // Missed shots aren't lost: the arrow, bolt or thrown weapon lands where it hit and can be picked up.
             // Enchanted ones are spent, their enchantment having gone off.
             if (!hitActor && projectilePtr.getClass().getEnchantment(projectilePtr).empty())
             {
-                // Hard, fixed things (buildings, trees, rocks, the ground) catch it; loose items, doors and water
-                // don't.
+                // Fixed things made of something soft enough (wood, plants, earth) catch it. It glances off stone
+                // and metal, and off loose items, doors and water.
+                bool stick = false;
                 const bool hitTerrain = target.isEmpty() && !projectile->getHitWater();
-                const bool hitStatic = !target.isEmpty() && !target.getClass().isItem(target)
-                    && !target.getClass().isDoor();
-                placeMissedProjectile(projectileState, pos, hitPosition,
-                    Misc::Convert::toOsg(projectile->getHitNormal()), hitTerrain || hitStatic);
+                const bool hitStatic
+                    = !target.isEmpty() && !target.getClass().isItem(target) && !target.getClass().isDoor();
+                if (hitTerrain || hitStatic)
+                {
+                    osg::Vec3f direction = projectileState.mVelocity;
+                    direction.normalize();
+                    const MWRender::RenderingManager::SurfaceResult surface
+                        = mRendering->castRayForSurface(hitPosition - direction * 20.f, hitPosition + direction * 20.f);
+                    const VFS::Path::Normalized model
+                        = hitStatic ? target.getClass().getCorrectedModel(target) : VFS::Path::Normalized();
+                    // Bare ground takes arrows unless it looks rocky; unrecognized objects deflect them.
+                    stick = isSoftSurface(surface.mTexture, model.value(), hitTerrain || surface.mTerrain);
+                }
+                placeMissedProjectile(
+                    projectileState, hitPosition, Misc::Convert::toOsg(projectile->getHitNormal()), stick);
             }
 
             projectileState.mToDelete = true;
@@ -666,8 +719,8 @@ namespace MWWorld
             mMagicBolts.end());
     }
 
-    void ProjectileManager::placeMissedProjectile(const ProjectileState& state, const osg::Vec3f& flightPosition,
-        const osg::Vec3f& hitPosition, const osg::Vec3f& hitNormal, bool stick)
+    void ProjectileManager::placeMissedProjectile(
+        const ProjectileState& state, const osg::Vec3f& hitPosition, const osg::Vec3f& hitNormal, bool stick)
     {
         MWBase::World* world = MWBase::Environment::get().getWorld();
         MWWorld::CellStore* cell = world->getPlayerPtr().getCell();
@@ -676,9 +729,8 @@ namespace MWWorld
 
         osg::Vec3f direction = state.mVelocity;
         direction.normalize();
-        // Stuck: where it was in flight when it hit, driven in a little further. Otherwise backed out of
-        // whatever it hit, so it doesn't start inside it.
-        const osg::Vec3f position = stick ? flightPosition + direction * 6.f : hitPosition - direction * 10.f;
+        // Backed out of whatever it hit, so it doesn't start inside it (a stuck one is driven in afterwards).
+        const osg::Vec3f position = hitPosition - direction * 10.f;
         if (cell->isExterior())
             cell = &MWBase::Environment::get().getWorldModel()->getExterior(
                 ESM::positionToExteriorCellLocation(position.x(), position.y(), cell->getCell()->getWorldSpace()));
@@ -695,7 +747,7 @@ namespace MWWorld
         MWWorld::ManualRef ref(*MWBase::Environment::get().getESMStore(), state.mIdArrow, 1);
         const MWWorld::Ptr placed = world->placeObject(ref.getPtr(), cell, pos);
         if (stick)
-            mPhysics->stickObject(placed);
+            mPhysics->stickObject(placed, hitPosition);
         else
         {
             // Glance off what it hit, losing most of its speed.

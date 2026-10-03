@@ -182,6 +182,15 @@ namespace MWRender
         RayResult castRay(const osg::Vec3f& origin, const osg::Vec3f& dest, bool ignorePlayer,
             bool ignoreActors = false, bool ignoreTerrain = false, std::span<const MWWorld::Ptr> ignoreList = {});
 
+        struct SurfaceResult
+        {
+            bool mHit = false;
+            bool mTerrain = false;
+            std::string mTexture; // file name of the base texture of what was hit, if any
+        };
+        /// What the first thing (other than actors) between origin and dest looks like.
+        SurfaceResult castRayForSurface(const osg::Vec3f& origin, const osg::Vec3f& dest);
+
         /// Return the object under the mouse cursor / crosshair position, given by nX and nY normalized screen
         /// coordinates, where (0,0) is the top left corner.
         RayResult castCameraToViewportRay(const float nX, const float nY, float maxDistance, bool ignorePlayer,
