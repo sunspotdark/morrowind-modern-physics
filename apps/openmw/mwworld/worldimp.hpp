@@ -115,6 +115,7 @@ namespace MWWorld
         bool mGodMode;
         bool mScriptsEnabled;
         bool mDiscardMovements;
+        bool mPlayerAttackSuppressed = false;
         std::vector<std::string> mContentFiles;
 
         std::filesystem::path mUserDataPath;
@@ -382,6 +383,13 @@ namespace MWWorld
         /// \param adjust indicates rotation should be set or adjusted
         void rotateObject(const Ptr& ptr, const osg::Vec3f& rot,
             MWBase::RotationFlags flags = MWBase::RotationFlag_inverseOrder) override;
+
+        bool canGrabObject(const MWWorld::ConstPtr& ptr) const override;
+        bool grabObject(const MWWorld::Ptr& ptr) override;
+        void releaseGrabbedObject(bool throwObject) override;
+        bool isGrabbingObject() const override;
+        void setPlayerAttackSuppressed(bool suppressed) override { mPlayerAttackSuppressed = suppressed; }
+        bool isPlayerAttackSuppressed() const override { return mPlayerAttackSuppressed; }
 
         MWWorld::Ptr placeObject(
             const MWWorld::ConstPtr& ptr, MWWorld::CellStore* cell, const ESM::Position& pos) override;

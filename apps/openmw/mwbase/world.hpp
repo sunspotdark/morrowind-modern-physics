@@ -292,6 +292,16 @@ namespace MWBase
 
         virtual void scaleObject(const MWWorld::Ptr& ptr, float scale, bool force = false) = 0;
 
+        // Player carrying a simulated object in front of the camera.
+        virtual bool canGrabObject(const MWWorld::ConstPtr& ptr) const = 0;
+        virtual bool grabObject(const MWWorld::Ptr& ptr) = 0;
+        /// Drop the carried object, or throw it where the camera is looking.
+        virtual void releaseGrabbedObject(bool throwObject) = 0;
+        virtual bool isGrabbingObject() const = 0;
+        /// Stops the player's weapon/spell use (e.g. so clicking to throw doesn't also attack).
+        virtual void setPlayerAttackSuppressed(bool suppressed) = 0;
+        virtual bool isPlayerAttackSuppressed() const = 0;
+
         virtual void rotateObject(
             const MWWorld::Ptr& ptr, const osg::Vec3f& rot, RotationFlags flags = RotationFlag_inverseOrder)
             = 0;

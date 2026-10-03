@@ -4,6 +4,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <shared_mutex>
@@ -69,6 +70,13 @@ namespace MWPhysics
         void setCollisionFilterMask(btCollisionObject* collisionObject, int collisionFilterMask);
         void addCollisionObject(btCollisionObject* collisionObject, int collisionFilterGroup, int collisionFilterMask);
         void addRigidBody(btRigidBody* body, int collisionFilterGroup, int collisionFilterMask);
+
+        // Carrying a dynamic object: each physics step it is steered towards the hold target.
+        void holdObject(const std::shared_ptr<Object>& object);
+        void setHoldTarget(const btVector3& target);
+        /// Let go of the held object, optionally setting its velocity (for throwing).
+        void releaseHeldObject(const std::optional<btVector3>& velocity);
+        std::shared_ptr<Object> getHeldObject() const;
         void removeCollisionObject(btCollisionObject* collisionObject);
         void updateSingleAabb(const std::shared_ptr<PtrHolder>& ptr, bool immediate = false);
         bool getLineOfSight(const std::shared_ptr<Actor>& actor1, const std::shared_ptr<Actor>& actor2);
@@ -94,6 +102,7 @@ namespace MWPhysics
         void afterPostSim();
         void pushDynamicObjects();
         void stepDynamics();
+        void releaseHeldObjectUnsafe(btRigidBody& body, const std::optional<btVector3>& velocity);
         void syncWithMainThread();
         void waitForWorkers();
         void prepareWork(float& timeAccum, std::vector<Simulation>& simulations, osg::Timer_t frameStart,
@@ -108,6 +117,9 @@ namespace MWPhysics
         btCollisionWorld* mCollisionWorld;
         btDiscreteDynamicsWorld* mDynamicsWorld; // same object as mCollisionWorld
         int mNumRigidBodies = 0;
+        std::weak_ptr<Object> mHeldObject;
+        btVector3 mHoldTarget;
+        mutable std::mutex mHeldObjectMutex;
         MWRender::DebugDrawer* mDebugDrawer;
         std::vector<LOSRequest> mLOSCache;
         std::set<std::weak_ptr<PtrHolder>, std::owner_less<std::weak_ptr<PtrHolder>>> mUpdateAabb;

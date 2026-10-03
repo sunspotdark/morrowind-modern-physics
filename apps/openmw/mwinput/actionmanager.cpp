@@ -48,6 +48,56 @@ namespace MWInput
         }
         else
             mTimeIdle += dt;
+
+        updateCarrying(dt);
+    }
+
+    void ActionManager::updateCarrying(float dt)
+    {
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        const bool guiMode = MWBase::Environment::get().getWindowManager()->isGuiMode();
+        const bool activateHeld = mBindingsManager->actionIsActive(A_Activate);
+        const bool useHeld = mBindingsManager->actionIsActive(A_Use);
+
+        if (mActivatePending)
+        {
+            constexpr float holdToCarryTime = 0.3f;
+            if (guiMode)
+                mActivatePending = false;
+            else if (!activateHeld)
+            {
+                // Just a tap: normal activation (take the item, with the usual ownership rules).
+                mActivatePending = false;
+                MWBase::Environment::get().getWorld()->getPlayer().activate();
+            }
+            else if ((mActivateHeldTime += dt) >= holdToCarryTime)
+            {
+                // Held: carry it. Moving an item around is not taking it, so this is never a crime.
+                mActivatePending = false;
+                mCarrying = world->grabObject(world->getFocusObject());
+            }
+        }
+
+        if (mCarrying)
+        {
+            if (!world->isGrabbingObject()) // let go by the physics (stuck, or the object went away)
+                mCarrying = false;
+            else if (guiMode || !activateHeld)
+            {
+                world->releaseGrabbedObject(false);
+                mCarrying = false;
+            }
+            else if (useHeld)
+            {
+                world->releaseGrabbedObject(true);
+                mCarrying = false;
+                mSuppressAttackUntilReleased = true;
+            }
+        }
+
+        if (mSuppressAttackUntilReleased && !useHeld)
+            mSuppressAttackUntilReleased = false;
+        world->setPlayerAttackSuppressed(mCarrying || mSuppressAttackUntilReleased);
     }
 
     void ActionManager::resetIdleTime()
@@ -74,7 +124,16 @@ namespace MWInput
                 break;
             case A_Activate:
                 inputManager->resetIdleTime();
-                activate();
+                if (!windowManager->isGuiMode() && inputManager->getControlSwitch("playercontrols")
+                    && MWBase::Environment::get().getWorld()->canGrabObject(
+                        MWBase::Environment::get().getWorld()->getFocusObject()))
+                {
+                    // Decided in updateCarrying: tap to activate, hold to carry.
+                    mActivatePending = true;
+                    mActivateHeldTime = 0;
+                }
+                else
+                    activate();
                 break;
             case A_MoveLeft:
             case A_MoveRight:

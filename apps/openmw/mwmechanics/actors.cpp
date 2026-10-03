@@ -384,7 +384,9 @@ namespace MWMechanics
                 stats.setMovementFlag(MWMechanics::CreatureStats::Flag_Run, controls.mRun);
                 stats.setMovementFlag(MWMechanics::CreatureStats::Flag_Sneak, controls.mSneak);
 
-                stats.setAttackingOrSpell(controls.mUse != AttackType::NoAttack);
+                const bool attackSuppressed
+                    = isPlayer && MWBase::Environment::get().getWorld()->isPlayerAttackSuppressed();
+                stats.setAttackingOrSpell(controls.mUse != AttackType::NoAttack && !attackSuppressed);
                 stats.setAttackType(attackTypeName(controls.mUse));
 
                 controls.mChanged = false;

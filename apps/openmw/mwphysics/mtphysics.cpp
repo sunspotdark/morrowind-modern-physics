@@ -937,6 +937,7 @@ namespace MWPhysics
             if (auto* actorSim = std::get_if<ActorSimulation>(&sim))
                 if (auto locked = actorSim->lock())
                     actors.push_back(std::move(locked->first));
+        const std::shared_ptr<Object> held = getHeldObject();
 
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
         for (const auto& actor : actors)
@@ -956,6 +957,10 @@ namespace MWPhysics
             ContactTestWrapper::contactTest(mCollisionWorld, actor->getCollisionObject(), callback);
             for (const auto& contact : callback.mContacts)
             {
+                // A carried object is steered by the carrier, not shoved.
+                if (held != nullptr && contact.mBody == held->getRigidBody())
+                    continue;
+
                 // Push horizontally, away from the actor. If the contact is (nearly) vertical, e.g. the actor is
                 // stepping over the object, push it along the actor's direction of movement instead.
                 btVector3 direction = contact.mPushDirection;
@@ -983,9 +988,98 @@ namespace MWPhysics
     {
         if (mNumRigidBodies == 0)
             return;
+
+        // Locked object must outlive the collision world lock (its destructor takes the lock).
+        std::shared_ptr<Object> held;
+        btVector3 holdTarget;
+        {
+            std::lock_guard heldLock(mHeldObjectMutex);
+            held = mHeldObject.lock();
+            holdTarget = mHoldTarget;
+        }
+
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+
+        if (held != nullptr)
+        {
+            btRigidBody& body = *held->getRigidBody();
+            const btVector3 offset = holdTarget - body.getCenterOfMassPosition();
+            // Stuck behind something, or the carrier moved away too fast: let go.
+            constexpr btScalar maxHoldDistance = 200.f;
+            if (offset.length2() > maxHoldDistance * maxHoldDistance)
+            {
+                releaseHeldObjectUnsafe(body, std::nullopt);
+                std::lock_guard heldLock(mHeldObjectMutex);
+                mHeldObject.reset();
+            }
+            else
+            {
+                // Close most of the remaining gap each step; collisions still stop the object.
+                btVector3 velocity = offset * (0.5f / mPhysicsDt);
+                constexpr btScalar maxCarrySpeed = 2000.f;
+                if (velocity.length2() > maxCarrySpeed * maxCarrySpeed)
+                    velocity *= maxCarrySpeed / velocity.length();
+                body.setLinearVelocity(velocity);
+                body.setAngularVelocity(body.getAngularVelocity() * 0.8f);
+            }
+        }
+
         // We are already called once per fixed physics step, so no substepping.
         mDynamicsWorld->stepSimulation(mPhysicsDt, 0);
+    }
+
+    void PhysicsTaskScheduler::holdObject(const std::shared_ptr<Object>& object)
+    {
+        releaseHeldObject(std::nullopt);
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        btRigidBody& body = *object->getRigidBody();
+        body.setActivationState(DISABLE_DEACTIVATION);
+        body.setGravity(btVector3(0, 0, 0));
+        std::lock_guard heldLock(mHeldObjectMutex);
+        mHeldObject = object;
+        mHoldTarget = body.getCenterOfMassPosition();
+    }
+
+    void PhysicsTaskScheduler::setHoldTarget(const btVector3& target)
+    {
+        std::lock_guard heldLock(mHeldObjectMutex);
+        mHoldTarget = target;
+    }
+
+    void PhysicsTaskScheduler::releaseHeldObject(const std::optional<btVector3>& velocity)
+    {
+        const std::shared_ptr<Object> held = getHeldObject();
+        if (held == nullptr)
+            return;
+        {
+            MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+            releaseHeldObjectUnsafe(*held->getRigidBody(), velocity);
+        }
+        std::lock_guard heldLock(mHeldObjectMutex);
+        mHeldObject.reset();
+    }
+
+    void PhysicsTaskScheduler::releaseHeldObjectUnsafe(btRigidBody& body, const std::optional<btVector3>& velocity)
+    {
+        body.forceActivationState(ACTIVE_TAG);
+        body.setDeactivationTime(0);
+        body.setGravity(mDynamicsWorld->getGravity());
+        if (velocity)
+            body.setLinearVelocity(*velocity);
+        else
+        {
+            // Dropped: don't keep the speed it had while being steered around.
+            constexpr btScalar maxDropSpeed = 300.f;
+            const btVector3 current = body.getLinearVelocity();
+            if (current.length2() > maxDropSpeed * maxDropSpeed)
+                body.setLinearVelocity(current * (maxDropSpeed / current.length()));
+        }
+    }
+
+    std::shared_ptr<Object> PhysicsTaskScheduler::getHeldObject() const
+    {
+        std::lock_guard heldLock(mHeldObjectMutex);
+        return mHeldObject.lock();
     }
 
     void PhysicsTaskScheduler::afterPostSim()

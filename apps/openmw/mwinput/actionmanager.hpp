@@ -43,12 +43,20 @@ namespace MWInput
 
     private:
         void handleGuiArrowKey(int action);
+        void updateCarrying(float dt);
 
         BindingsManager* mBindingsManager;
         osg::ref_ptr<osgViewer::Viewer> mViewer;
         osg::ref_ptr<osgViewer::ScreenCaptureHandler> mScreenCaptureHandler;
 
         float mTimeIdle;
+
+        // Activate pressed on a carryable object: a tap activates it, holding the key picks it up to carry.
+        bool mActivatePending = false;
+        float mActivateHeldTime = 0;
+        bool mCarrying = false;
+        // After throwing, the attack button stays suppressed until it is released.
+        bool mSuppressAttackUntilReleased = false;
     };
 }
 #endif

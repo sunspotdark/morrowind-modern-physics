@@ -618,6 +618,56 @@ namespace MWPhysics
         mDynamicObjects.push_back(std::move(obj));
     }
 
+    bool PhysicsSystem::canHoldObject(const MWWorld::ConstPtr& ptr) const
+    {
+        const Object* object = getObject(ptr);
+        return object != nullptr && object->isDynamic();
+    }
+
+    bool PhysicsSystem::holdObject(const MWWorld::Ptr& ptr)
+    {
+        const auto found = mObjects.find(ptr.mRef);
+        if (found == mObjects.end() || !found->second->isDynamic())
+            return false;
+        const std::shared_ptr<Object>& object = found->second;
+
+        // Hold it far enough out that it doesn't fill the view.
+        btVector3 aabbMin;
+        btVector3 aabbMax;
+        object->getRigidBody()->getCollisionShape()->getAabb(btTransform::getIdentity(), aabbMin, aabbMax);
+        const float radius = static_cast<float>((aabbMax - aabbMin).length() * 0.5);
+        mHoldDistance = std::max(70.f, 40.f + radius);
+
+        mTaskScheduler->holdObject(object);
+        return true;
+    }
+
+    void PhysicsSystem::setHoldView(const osg::Vec3f& eye, const osg::Vec3f& direction)
+    {
+        mTaskScheduler->setHoldTarget(Misc::Convert::toBullet(eye + direction * mHoldDistance));
+    }
+
+    void PhysicsSystem::releaseHeldObject(bool throwObject, const osg::Vec3f& direction)
+    {
+        if (!throwObject)
+        {
+            mTaskScheduler->releaseHeldObject(std::nullopt);
+            return;
+        }
+        const std::shared_ptr<Object> held = mTaskScheduler->getHeldObject();
+        if (held == nullptr)
+            return;
+        // Light things fly fast, heavy things barely leave the hand.
+        const float mass = static_cast<float>(1.0 / held->getRigidBody()->getInvMass());
+        const float speed = std::clamp(1200.f * std::sqrt(2.f / mass), 250.f, 1200.f);
+        mTaskScheduler->releaseHeldObject(Misc::Convert::toBullet(direction * speed));
+    }
+
+    bool PhysicsSystem::isHoldingObject() const
+    {
+        return mTaskScheduler->getHeldObject() != nullptr;
+    }
+
     void PhysicsSystem::placeOnSurface(Object& object)
     {
         // Objects placed or moved by the game (PlaceAtPC, snapping to ground) are positioned by their origin,

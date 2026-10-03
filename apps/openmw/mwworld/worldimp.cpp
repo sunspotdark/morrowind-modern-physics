@@ -1377,8 +1377,34 @@ namespace MWWorld
         mPhysics->updateAnimatedCollisionShape(ptr);
     }
 
+    bool World::canGrabObject(const MWWorld::ConstPtr& ptr) const
+    {
+        return !ptr.isEmpty() && mPhysics->canHoldObject(ptr);
+    }
+
+    bool World::grabObject(const MWWorld::Ptr& ptr)
+    {
+        return !ptr.isEmpty() && mPhysics->holdObject(ptr);
+    }
+
+    void World::releaseGrabbedObject(bool throwObject)
+    {
+        const MWRender::Camera* camera = mRendering->getCamera();
+        mPhysics->releaseHeldObject(throwObject, camera->getOrient() * osg::Vec3f(0, 1, 0));
+    }
+
+    bool World::isGrabbingObject() const
+    {
+        return mPhysics->isHoldingObject();
+    }
+
     void World::doPhysics(float duration, osg::Timer_t frameStart, unsigned int frameNumber, osg::Stats& stats)
     {
+        if (mPhysics->isHoldingObject())
+        {
+            const MWRender::Camera* camera = mRendering->getCamera();
+            mPhysics->setHoldView(camera->getPosition(), camera->getOrient() * osg::Vec3f(0, 1, 0));
+        }
         processDoors(duration);
         mProjectileManager->update(duration);
         mPhysics->stepSimulation(duration, mDiscardMovements, frameStart, frameNumber, stats);

@@ -178,6 +178,15 @@ namespace MWPhysics
             int collisionType = CollisionType_World);
         /// Add an object simulated as a rigid body (knocked around by actors, falls under gravity).
         void addDynamicObject(const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation, float mass);
+
+        // Carrying simulated objects (one at a time)
+        bool canHoldObject(const MWWorld::ConstPtr& ptr) const;
+        bool holdObject(const MWWorld::Ptr& ptr);
+        /// Keep the held object in front of a viewer at eye, looking along direction (normalized).
+        void setHoldView(const osg::Vec3f& eye, const osg::Vec3f& direction);
+        /// Drop the held object, or throw it along direction (normalized).
+        void releaseHeldObject(bool throwObject, const osg::Vec3f& direction);
+        bool isHoldingObject() const;
         void addActor(const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh);
 
         int addProjectile(
@@ -331,6 +340,7 @@ namespace MWPhysics
 
         std::vector<std::shared_ptr<Object>> mDynamicObjects; // subset of mObjects
         bool mMovingDynamicObjects = false;
+        float mHoldDistance = 0;
         std::unordered_map<std::string, std::vector<btVector3>> mHullCache;
         std::set<std::string, std::less<>> mWarnedNoShape;
 
