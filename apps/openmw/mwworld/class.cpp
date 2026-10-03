@@ -4,7 +4,12 @@
 #include <stdexcept>
 
 #include <components/esm/defs.hpp>
+#include <components/esm3/loadarmo.hpp>
 #include <components/esm3/loadench.hpp>
+#include <components/esm3/loadlock.hpp>
+#include <components/esm3/loadprob.hpp>
+#include <components/esm3/loadrepa.hpp>
+#include <components/esm3/loadweap.hpp>
 #include <components/esm3/loadmgef.hpp>
 #include <components/esm3/loadsoun.hpp>
 #include <components/misc/resourcehelpers.hpp>
@@ -54,10 +59,15 @@ namespace MWWorld
         if (mesh.empty() || !isItem(ptr))
             return;
         const float mass = std::clamp(getWeight(ptr), 0.2f, 50.f);
+        // Metal goods sink no matter how light they are for their size.
+        const unsigned type = ptr.getType();
+        const bool metal = type == ESM::Weapon::sRecordId || type == ESM::Armor::sRecordId
+            || type == ESM::Lockpick::sRecordId || type == ESM::Probe::sRecordId || type == ESM::Repair::sRecordId
+            || ptr.getClass().isGold(ptr);
         // Script-placed objects normally get collision only after the next cell change. Simulated objects
         // need it right away, or they would just hang in the air.
         ptr.mRef->mData.mPhysicsPostponed = false;
-        physics.addDynamicObject(ptr, VFS::Path::toNormalized(mesh), rotation, mass);
+        physics.addDynamicObject(ptr, VFS::Path::toNormalized(mesh), rotation, mass, metal);
     }
 
     bool Class::consume(const MWWorld::Ptr& consumable, const MWWorld::Ptr& actor) const

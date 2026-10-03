@@ -89,6 +89,9 @@ namespace MWPhysics
         };
         void strikeObjects(const std::vector<Strike>& strikes);
 
+        /// Water level for buoyancy, or none.
+        void setWaterHeight(std::optional<float> height);
+
         /// Watch a thrown object for hitting an actor (other than the thrower) while it flies.
         void addFlyingObject(const std::shared_ptr<Object>& object, const btCollisionObject* thrower);
         struct FlyingObjectHit
@@ -125,6 +128,7 @@ namespace MWPhysics
         void pushDynamicObjects();
         void stepDynamics();
         void releaseHeldObjectUnsafe(btRigidBody& body, const std::optional<btVector3>& velocity);
+        void applyWaterForces(float waterHeight);
         void freeWedgedObjectUnsafe(const std::shared_ptr<Object>& object);
         void updateWedgedObjects(const std::vector<std::shared_ptr<Object>>& objects);
         struct FlyingObject
@@ -147,6 +151,8 @@ namespace MWPhysics
         btCollisionWorld* mCollisionWorld;
         btDiscreteDynamicsWorld* mDynamicsWorld; // same object as mCollisionWorld
         int mNumRigidBodies = 0;
+        std::atomic<bool> mHasWater{ false };
+        std::atomic<float> mWaterHeight{ 0.f };
         std::weak_ptr<Object> mHeldObject;
         btVector3 mHoldTarget;
         btQuaternion mHoldTargetRotation;

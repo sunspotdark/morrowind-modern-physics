@@ -644,7 +644,7 @@ namespace MWPhysics
     }
 
     void PhysicsSystem::addDynamicObject(
-        const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation, float mass)
+        const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation, float mass, bool metal)
     {
         if (ptr.mRef->mData.mPhysicsPostponed)
             return;
@@ -664,16 +664,42 @@ namespace MWPhysics
         const std::shared_ptr<const Resource::BulletShape> visible = mShapeManager->getVisibleShape(mesh);
         const std::vector<btVector3>& hullPoints
             = getHullPoints(mesh, visible != nullptr ? *visible : *shapeInstance->getSource());
-        auto obj = std::make_shared<Object>(ptr, shapeInstance, rotation, mass, hullPoints, mTaskScheduler.get());
-
-        if (!ptr.getCellRef().getRefNum().hasContentFile())
-        {
-            placeOnSurface(*obj);
-            mTaskScheduler->updateSingleAabb(obj);
-        }
+        auto obj = std::make_shared<Object>(
+            ptr, shapeInstance, rotation, mass, metal, hullPoints, mTaskScheduler.get());
 
         mObjects.emplace(ptr.mRef, obj);
         mDynamicObjects.push_back(std::move(obj));
+    }
+
+    void PhysicsSystem::wakeNewObject(const MWWorld::Ptr& ptr)
+    {
+        const auto found = mObjects.find(ptr.mRef);
+        if (found == mObjects.end() || !found->second->isDynamic())
+            return;
+        placeOnSurface(*found->second);
+        found->second->requestWake();
+        mTaskScheduler->updateSingleAabb(found->second);
+    }
+
+    void PhysicsSystem::stickObject(const MWWorld::Ptr& ptr)
+    {
+        const auto found = mObjects.find(ptr.mRef);
+        if (found == mObjects.end() || !found->second->isDynamic())
+            return;
+        // Exactly where the game object is (no placing on surfaces: it's meant to be embedded), and asleep.
+        found->second->updatePosition();
+        found->second->requestSleep();
+        mTaskScheduler->updateSingleAabb(found->second);
+    }
+
+    void PhysicsSystem::launchObject(const MWWorld::Ptr& ptr, const osg::Vec3f& velocity)
+    {
+        const auto found = mObjects.find(ptr.mRef);
+        if (found == mObjects.end() || !found->second->isDynamic())
+            return;
+        found->second->requestVelocity(velocity);
+        found->second->requestWake();
+        mTaskScheduler->updateSingleAabb(found->second);
     }
 
     bool PhysicsSystem::canHoldObject(const MWWorld::ConstPtr& ptr) const
@@ -1202,9 +1228,18 @@ namespace MWPhysics
         mMovingDynamicObjects = true;
         for (const auto& object : objects)
         {
+            const float heightBefore = static_cast<float>(object->getTransform().getOrigin().z());
             const auto transform = object->takeSimulatedTransform();
             if (!transform)
                 continue;
+
+            if (mWaterEnabled && heightBefore > mWaterHeight && transform->first.z() <= mWaterHeight)
+            {
+                // Simulation steps are 1/mPhysicsDt per second.
+                const float speed = (heightBefore - transform->first.z()) / mPhysicsDt;
+                world->objectEnteredWater(
+                    osg::Vec3f(transform->first.x(), transform->first.y(), mWaterHeight), speed);
+            }
 
             // Safety net: something that slipped through the ground would fall forever. Put it back on top.
             const MWWorld::Ptr current = object->getPtr();
@@ -1311,6 +1346,8 @@ namespace MWPhysics
 
     void PhysicsSystem::updateWater()
     {
+        mTaskScheduler->setWaterHeight(mWaterEnabled ? std::optional(mWaterHeight) : std::nullopt);
+
         if (mWaterCollisionObject)
         {
             mTaskScheduler->removeCollisionObject(mWaterCollisionObject.get());

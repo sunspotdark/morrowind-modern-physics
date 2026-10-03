@@ -42,7 +42,11 @@ namespace MWPhysics
         /// Construct a simulated rigid body with the given mass. Its shape is the convex hull of hullPoints (in
         /// unscaled mesh space), or a box around the mesh if there are none.
         Object(const MWWorld::Ptr& ptr, std::shared_ptr<Resource::BulletShapeInstance> shapeInstance,
-            osg::Quat rotation, float mass, const std::vector<btVector3>& hullPoints, PhysicsTaskScheduler* scheduler);
+            osg::Quat rotation, float mass, bool metal, const std::vector<btVector3>& hullPoints,
+            PhysicsTaskScheduler* scheduler);
+
+        /// For dynamic objects: density relative to water (below 1 floats).
+        float getRelativeDensity() const { return mRelativeDensity; }
         ~Object() override;
 
         bool isDynamic() const { return mRigidBody != nullptr; }
@@ -66,6 +70,11 @@ namespace MWPhysics
 
         /// Move the object; takes effect on the next commitPositionChange.
         void moveBy(const osg::Vec3f& offset);
+
+        // For dynamic objects; take effect on the next commitPositionChange, after any move.
+        void requestWake();
+        void requestSleep();
+        void requestVelocity(const osg::Vec3f& velocity);
 
         /// For dynamic objects: where it was last placed by the game (not the simulation).
         osg::Vec3f getPlacedPosition() const;
@@ -111,6 +120,15 @@ namespace MWPhysics
         btVector3 mCenterOffset; // center of mass relative to object origin, in object space
         osg::Vec3f mPlacedPosition;
         std::vector<const btCollisionObject*> mWedgedIn;
+        enum class PendingActivation
+        {
+            None,
+            Wake,
+            Sleep
+        };
+        PendingActivation mPendingActivation = PendingActivation::None;
+        std::optional<osg::Vec3f> mPendingVelocity;
+        float mRelativeDensity = 1.f;
     };
 }
 

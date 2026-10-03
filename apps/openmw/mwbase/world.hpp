@@ -303,6 +303,9 @@ namespace MWBase
         /// Stops the player's weapon/spell use (e.g. so clicking to throw doesn't also attack).
         virtual void setPlayerAttackSuppressed(bool suppressed) = 0;
 
+        /// A simulated object fell into water here, going down at speed: ripples, and a splash if fast.
+        virtual void objectEnteredWater(const osg::Vec3f& position, float speed) = 0;
+
         /// Blow simulated objects away from an area effect at center.
         virtual void pushObjectsFromExplosion(const osg::Vec3f& center, float radius) = 0;
         /// A melee attack that didn't hit anyone: knock a simulated object in reach, if any.

@@ -5,6 +5,7 @@
 
 #include <components/bullethelpers/collisionobject.hpp>
 #include <components/debug/debuglog.hpp>
+#include <components/misc/constants.hpp>
 #include <components/misc/convert.hpp>
 #include <components/nifosg/particle.hpp>
 #include <components/resource/bulletshape.hpp>
@@ -87,7 +88,8 @@ namespace MWPhysics
     }
 
     Object::Object(const MWWorld::Ptr& ptr, std::shared_ptr<Resource::BulletShapeInstance> shapeInstance,
-        osg::Quat rotation, float mass, const std::vector<btVector3>& hullPoints, PhysicsTaskScheduler* scheduler)
+        osg::Quat rotation, float mass, bool metal, const std::vector<btVector3>& hullPoints,
+        PhysicsTaskScheduler* scheduler)
         : PtrHolder(ptr, osg::Vec3f())
         , mShapeInstance(std::move(shapeInstance))
         , mSolid(true)
@@ -133,6 +135,15 @@ namespace MWPhysics
             mDynamicShape = std::make_unique<btBoxShape>(halfExtents);
         }
 
+        // Density relative to water, treating the weight as kilograms and the shape as about 60% solid.
+        const btScalar unitsPerMeter = Constants::UnitsPerMeter;
+        const btScalar volume = 8 * halfExtents.x() * halfExtents.y() * halfExtents.z() * 0.6f
+            / (unitsPerMeter * unitsPerMeter * unitsPerMeter); // cubic meters
+        // Even light things (an empty bottle) float partly submerged, not perched on top.
+        mRelativeDensity = std::clamp(static_cast<float>(mass / (volume * 1000)), 0.4f, 8.f);
+        if (metal)
+            mRelativeDensity = std::max(mRelativeDensity, 3.f);
+
         btVector3 inertia(0, 0, 0);
         mDynamicShape->calculateLocalInertia(mass, inertia);
 
@@ -155,10 +166,9 @@ namespace MWPhysics
         const btScalar minHalfExtent = std::max(halfExtents[halfExtents.minAxis()], minHullHalfExtent);
         mRigidBody->setCcdMotionThreshold(minHalfExtent * 0.5f);
         mRigidBody->setCcdSweptSphereRadius(minHalfExtent);
-        // Clutter from the game files starts asleep, so it stays where the level designer put it until something
-        // touches it. Objects created during play (dropped, spawned) settle under gravity right away.
-        if (ptr.getCellRef().getRefNum().hasContentFile())
-            mRigidBody->setActivationState(ISLAND_SLEEPING);
+        // Everything starts asleep, so it stays exactly where it was (as placed in the game files, or as left
+        // when the game was saved) until something touches it. Objects created during play are woken separately.
+        mRigidBody->setActivationState(ISLAND_SLEEPING);
         mRigidBody->setUserPointer(this);
         mCollisionObject = std::move(body);
 
@@ -201,6 +211,24 @@ namespace MWPhysics
         btVector3 aabbMax;
         mDynamicShape->getAabb(getCenterOfMassTransform(), aabbMin, aabbMax);
         return { static_cast<float>(aabbMin.z()), static_cast<float>(aabbMax.z()) };
+    }
+
+    void Object::requestWake()
+    {
+        std::unique_lock<std::mutex> lock(mPositionMutex);
+        mPendingActivation = PendingActivation::Wake;
+    }
+
+    void Object::requestSleep()
+    {
+        std::unique_lock<std::mutex> lock(mPositionMutex);
+        mPendingActivation = PendingActivation::Sleep;
+    }
+
+    void Object::requestVelocity(const osg::Vec3f& velocity)
+    {
+        std::unique_lock<std::mutex> lock(mPositionMutex);
+        mPendingVelocity = velocity;
     }
 
     osg::Vec3f Object::getPlacedPosition() const
@@ -299,6 +327,23 @@ namespace MWPhysics
                     mDetailCollisionObject->setWorldTransform(trans);
             }
             mTransformUpdatePending = false;
+        }
+        if (mRigidBody != nullptr)
+        {
+            if (mPendingVelocity)
+            {
+                mRigidBody->setLinearVelocity(Misc::Convert::toBullet(*mPendingVelocity));
+                mPendingVelocity.reset();
+            }
+            if (mPendingActivation == PendingActivation::Wake)
+                mRigidBody->activate(true);
+            else if (mPendingActivation == PendingActivation::Sleep)
+            {
+                mRigidBody->setLinearVelocity(btVector3(0, 0, 0));
+                mRigidBody->setAngularVelocity(btVector3(0, 0, 0));
+                mRigidBody->forceActivationState(ISLAND_SLEEPING);
+            }
+            mPendingActivation = PendingActivation::None;
         }
     }
 

@@ -188,7 +188,16 @@ namespace MWPhysics
         void addObject(const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation,
             int collisionType = CollisionType_World);
         /// Add an object simulated as a rigid body (knocked around by actors, falls under gravity).
-        void addDynamicObject(const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation, float mass);
+        void addDynamicObject(
+            const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation, float mass, bool metal);
+
+        /// A simulated object was just created in the world (dropped, spawned): settle it onto the surface and
+        /// let it fall. Objects loaded with a cell stay asleep where they were.
+        void wakeNewObject(const MWWorld::Ptr& ptr);
+        /// Fix a simulated object, asleep, exactly where the game object is (an arrow stuck in a wall).
+        void stickObject(const MWWorld::Ptr& ptr);
+        /// Set a simulated object moving.
+        void launchObject(const MWWorld::Ptr& ptr, const osg::Vec3f& velocity);
 
         // Carrying simulated objects (one at a time)
         bool canHoldObject(const MWWorld::ConstPtr& ptr) const;

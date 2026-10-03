@@ -591,7 +591,15 @@ namespace MWWorld
             // Missed shots aren't lost: the arrow, bolt or thrown weapon lands where it hit and can be picked up.
             // Enchanted ones are spent, their enchantment having gone off.
             if (!hitActor && projectilePtr.getClass().getEnchantment(projectilePtr).empty())
-                placeMissedProjectile(projectileState, hitPosition);
+            {
+                // Hard, fixed things (buildings, trees, rocks, the ground) catch it; loose items, doors and water
+                // don't.
+                const bool hitTerrain = target.isEmpty() && !projectile->getHitWater();
+                const bool hitStatic = !target.isEmpty() && !target.getClass().isItem(target)
+                    && !target.getClass().isDoor();
+                placeMissedProjectile(projectileState, pos, hitPosition,
+                    Misc::Convert::toOsg(projectile->getHitNormal()), hitTerrain || hitStatic);
+            }
 
             projectileState.mToDelete = true;
         }
@@ -658,7 +666,8 @@ namespace MWWorld
             mMagicBolts.end());
     }
 
-    void ProjectileManager::placeMissedProjectile(const ProjectileState& state, const osg::Vec3f& hitPosition)
+    void ProjectileManager::placeMissedProjectile(const ProjectileState& state, const osg::Vec3f& flightPosition,
+        const osg::Vec3f& hitPosition, const osg::Vec3f& hitNormal, bool stick)
     {
         MWBase::World* world = MWBase::Environment::get().getWorld();
         MWWorld::CellStore* cell = world->getPlayerPtr().getCell();
@@ -667,8 +676,9 @@ namespace MWWorld
 
         osg::Vec3f direction = state.mVelocity;
         direction.normalize();
-        // Back out of whatever it hit, so it doesn't start inside it.
-        const osg::Vec3f position = hitPosition - direction * 10.f;
+        // Stuck: where it was in flight when it hit, driven in a little further. Otherwise backed out of
+        // whatever it hit, so it doesn't start inside it.
+        const osg::Vec3f position = stick ? flightPosition + direction * 6.f : hitPosition - direction * 10.f;
         if (cell->isExterior())
             cell = &MWBase::Environment::get().getWorldModel()->getExterior(
                 ESM::positionToExteriorCellLocation(position.x(), position.y(), cell->getCell()->getWorldSpace()));
@@ -683,7 +693,15 @@ namespace MWWorld
         pos.rot[2] = rotation.z();
 
         MWWorld::ManualRef ref(*MWBase::Environment::get().getESMStore(), state.mIdArrow, 1);
-        world->placeObject(ref.getPtr(), cell, pos);
+        const MWWorld::Ptr placed = world->placeObject(ref.getPtr(), cell, pos);
+        if (stick)
+            mPhysics->stickObject(placed);
+        else
+        {
+            // Glance off what it hit, losing most of its speed.
+            const osg::Vec3f reflected = state.mVelocity - hitNormal * (2.f * (state.mVelocity * hitNormal));
+            mPhysics->launchObject(placed, reflected * 0.25f);
+        }
     }
 
     void ProjectileManager::cleanupProjectile(ProjectileManager::ProjectileState& state)

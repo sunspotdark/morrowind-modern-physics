@@ -1149,10 +1149,84 @@ namespace MWPhysics
             }
         }
 
+        if (mHasWater)
+            applyWaterForces(mWaterHeight);
+
         // We are already called once per fixed physics step, so no substepping.
         mDynamicsWorld->stepSimulation(mPhysicsDt, 0);
 
         updateFlyingObjects(flying);
+    }
+
+    void PhysicsTaskScheduler::setWaterHeight(std::optional<float> height)
+    {
+        mWaterHeight = height.value_or(0.f);
+        mHasWater = height.has_value();
+    }
+
+    void PhysicsTaskScheduler::applyWaterForces(float waterHeight)
+    {
+        // Called with the collision world locked.
+        const btVector3 gravity = mDynamicsWorld->getGravity();
+        const btCollisionObjectArray& objects = mDynamicsWorld->getCollisionObjectArray();
+        for (int i = 0; i < objects.size(); ++i)
+        {
+            btRigidBody* body = btRigidBody::upcast(objects[i]);
+            if (body == nullptr || body->isStaticOrKinematicObject() || !body->isActive()
+                || body->getInvMass() == 0)
+                continue;
+            btVector3 aabbMin;
+            btVector3 aabbMax;
+            body->getAabb(aabbMin, aabbMax);
+            if (aabbMin.z() >= waterHeight)
+                continue;
+
+            // Buoyancy: the weight of the displaced water. Lighter than water floats, sitting at the depth where
+            // the two balance; heavier sinks, more slowly. It acts on sample points spread through the object,
+            // each by how deep it is, so the deeper side gets pushed up harder and the object turns into a
+            // natural floating position (a bottle on its side, a book flat) instead of keeping whatever angle it
+            // landed at.
+            const auto* object = static_cast<const Object*>(static_cast<const PtrHolder*>(body->getUserPointer()));
+            const btScalar mass = 1 / body->getInvMass();
+            btVector3 localMin;
+            btVector3 localMax;
+            body->getCollisionShape()->getAabb(btTransform::getIdentity(), localMin, localMax);
+            const btVector3 halfExtents = (localMax - localMin) * 0.5;
+            // How much of the depth range a sample point stands for.
+            const btScalar pointRadius = std::max(halfExtents[halfExtents.minAxis()], btScalar(1));
+            const btTransform& transform = body->getWorldTransform();
+            constexpr int numPoints = 9; // the center and the eight corners, pulled in a bit
+            const btVector3 pointBuoyancy = -gravity * (mass / object->getRelativeDensity() / numPoints);
+            btScalar submerged = 0;
+            for (int p = 0; p < numPoints; ++p)
+            {
+                btVector3 local(0, 0, 0);
+                if (p > 0)
+                    local = btVector3((p & 1) ? 0.7f : -0.7f, (p & 2) ? 0.7f : -0.7f, (p & 4) ? 0.7f : -0.7f)
+                        * halfExtents;
+                const btVector3 point = transform * local;
+                const btScalar pointSubmerged = std::clamp(
+                    (waterHeight - point.z()) / (2 * pointRadius) + btScalar(0.5), btScalar(0), btScalar(1));
+                if (pointSubmerged <= 0)
+                    continue;
+                body->applyForce(pointBuoyancy * pointSubmerged, point - transform.getOrigin());
+                submerged += pointSubmerged / numPoints;
+            }
+
+            // Water drag, so sinking things drift down and floating things settle rather than bob forever. It
+            // slows light things more (less mass behind the same surface) and fast things more (drag grows with
+            // speed), so whatever hits the water hard is caught by it instead of skipping off the surface.
+            constexpr btScalar waterDrag = 4.f; // per second, fully submerged, at rest, for water-dense things
+            const btScalar speed = body->getLinearVelocity().length();
+            const btScalar drag = waterDrag * std::max(btScalar(1), btScalar(1 / object->getRelativeDensity()))
+                * (1 + speed / 400.f);
+            const btScalar damping = std::max(btScalar(0.3), 1 - drag * submerged * mPhysicsDt);
+            body->setLinearVelocity(body->getLinearVelocity() * damping);
+            // Gentler on spin, so it can still turn to float naturally.
+            constexpr btScalar waterSpinDrag = 2.f; // per second, fully submerged
+            body->setAngularVelocity(
+                body->getAngularVelocity() * std::max(btScalar(0.5), 1 - waterSpinDrag * submerged * mPhysicsDt));
+        }
     }
 
     void PhysicsTaskScheduler::addFlyingObject(const std::shared_ptr<Object>& object, const btCollisionObject* thrower)

@@ -391,6 +391,7 @@ namespace MWWorld
         void rotateGrabbedObject(float yaw, float pitch) override;
         void setPlayerAttackSuppressed(bool suppressed) override { mPlayerAttackSuppressed = suppressed; }
         void pushObjectsFromExplosion(const osg::Vec3f& center, float radius) override;
+        void objectEnteredWater(const osg::Vec3f& position, float speed) override;
         void knockObjectInMeleeReach(const MWWorld::Ptr& attacker, float reach) override;
         bool isPlayerAttackSuppressed() const override { return mPlayerAttackSuppressed; }
 

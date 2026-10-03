@@ -1406,6 +1406,15 @@ namespace MWWorld
         return mPhysics->isHoldingObject();
     }
 
+    void World::objectEnteredWater(const osg::Vec3f& position, float speed)
+    {
+        mRendering->emitWaterRipple(position);
+        constexpr float minSplashSpeed = 150.f;
+        if (speed >= minSplashSpeed)
+            MWBase::Environment::get().getSoundManager()->playSound3D(position,
+                ESM::RefId::stringRefId("DefaultLandWater"), std::min(1.f, speed / 800.f), 1.0f);
+    }
+
     void World::pushObjectsFromExplosion(const osg::Vec3f& center, float radius)
     {
         mPhysics->explode(center, radius, 600.f);
@@ -2108,6 +2117,10 @@ namespace MWWorld
                 moveObject(object, pos.asVec3());
             }
         }
+
+        // Newly created loose items fall into place (ones loaded with a cell stay put where they were).
+        if (object.getRefData().getBaseNode())
+            mPhysics->wakeNewObject(object);
     }
 
     MWWorld::Ptr World::dropObjectOnGround(const Ptr& actor, const Ptr& object, int amount, bool copy)
