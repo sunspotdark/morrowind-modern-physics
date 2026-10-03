@@ -42,6 +42,9 @@ namespace Resource
 }
 
 class btCollisionWorld;
+class btDiscreteDynamicsWorld;
+class btConstraintSolver;
+struct btOverlapFilterCallback;
 class btBroadphaseInterface;
 class btDefaultCollisionConfiguration;
 class btCollisionDispatcher;
@@ -168,6 +171,8 @@ namespace MWPhysics
 
         void addObject(const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation,
             int collisionType = CollisionType_World);
+        /// Add an object simulated as a rigid body (knocked around by actors, falls under gravity).
+        void addDynamicObject(const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation, float mass);
         void addActor(const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh);
 
         int addProjectile(
@@ -204,7 +209,7 @@ namespace MWPhysics
         void stepSimulation(
             float dt, bool skipSimulation, osg::Timer_t frameStart, unsigned int frameNumber, osg::Stats& stats);
 
-        /// Apply new positions to actors
+        /// Apply new positions to actors and simulated objects
         void moveActors();
         void debugDraw();
 
@@ -299,10 +304,15 @@ namespace MWPhysics
 
         void prepareSimulation(bool willSimulate, std::vector<Simulation>& simulations);
 
+        void moveDynamicObjects();
+
+        std::unique_ptr<btOverlapFilterCallback> mOverlapFilter;
         std::unique_ptr<btBroadphaseInterface> mBroadphase;
         std::unique_ptr<btDefaultCollisionConfiguration> mCollisionConfiguration;
         std::unique_ptr<btCollisionDispatcher> mDispatcher;
-        std::unique_ptr<btCollisionWorld> mCollisionWorld;
+        std::unique_ptr<btConstraintSolver> mConstraintSolver;
+        // A dynamics world, so it can simulate rigid bodies; most of the code only needs collision queries.
+        std::unique_ptr<btDiscreteDynamicsWorld> mCollisionWorld;
         std::unique_ptr<PhysicsTaskScheduler> mTaskScheduler;
 
         std::unique_ptr<Resource::BulletShapeManager> mShapeManager;
@@ -310,6 +320,9 @@ namespace MWPhysics
 
         using ObjectMap = std::unordered_map<const MWWorld::LiveCellRefBase*, std::shared_ptr<Object>>;
         ObjectMap mObjects;
+
+        std::vector<std::shared_ptr<Object>> mDynamicObjects; // subset of mObjects
+        bool mMovingDynamicObjects = false;
 
         std::map<Object*, bool> mAnimatedObjects; // stores pointers to elements in mObjects
 

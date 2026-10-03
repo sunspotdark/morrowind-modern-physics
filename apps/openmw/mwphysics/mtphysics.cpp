@@ -1,5 +1,6 @@
 #include "mtphysics.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <functional>
 #include <mutex>
@@ -9,7 +10,10 @@
 #include <variant>
 
 #include <BulletCollision/BroadphaseCollision/btDbvtBroadphase.h>
+#include <BulletCollision/CollisionDispatch/btCollisionObjectWrapper.h>
 #include <BulletCollision/CollisionShapes/btCollisionShape.h>
+#include <BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h>
+#include <BulletDynamics/Dynamics/btRigidBody.h>
 #include <LinearMath/btThreads.h>
 
 #include <osg/Stats>
@@ -130,6 +134,53 @@ namespace
     {
         return actorData.mPosition.z() < actorData.mSwimLevel;
     }
+
+    // Finds the dynamic bodies an actor overlaps, keeping the deepest contact for each.
+    class DynamicContactCallback final : public btCollisionWorld::ContactResultCallback
+    {
+    public:
+        struct Contact
+        {
+            btRigidBody* mBody;
+            btVector3 mPoint; // on the body, world space
+            btVector3 mPushDirection; // from the actor into the body
+            btScalar mDistance;
+        };
+
+        explicit DynamicContactCallback(const btCollisionObject* actor)
+            : mActor(actor)
+        {
+            m_collisionFilterGroup = MWPhysics::CollisionType_Actor;
+            m_collisionFilterMask = MWPhysics::CollisionType_Dynamic;
+        }
+
+        btScalar addSingleResult(btManifoldPoint& cp, const btCollisionObjectWrapper* col0Wrap, int /*partId0*/,
+            int /*index0*/, const btCollisionObjectWrapper* col1Wrap, int /*partId1*/, int /*index1*/) override
+        {
+            // m_normalWorldOnB points from B towards A.
+            const bool actorIsA = col0Wrap->getCollisionObject() == mActor;
+            const btCollisionObject* other
+                = actorIsA ? col1Wrap->getCollisionObject() : col0Wrap->getCollisionObject();
+            btRigidBody* body = btRigidBody::upcast(const_cast<btCollisionObject*>(other));
+            if (body == nullptr)
+                return 0;
+            const btVector3 point = actorIsA ? cp.getPositionWorldOnB() : cp.getPositionWorldOnA();
+            const btVector3 pushDirection = actorIsA ? -cp.m_normalWorldOnB : cp.m_normalWorldOnB;
+
+            auto existing = std::find_if(
+                mContacts.begin(), mContacts.end(), [&](const Contact& c) { return c.mBody == body; });
+            if (existing == mContacts.end())
+                mContacts.push_back({ body, point, pushDirection, cp.getDistance() });
+            else if (cp.getDistance() < existing->mDistance)
+                *existing = { body, point, pushDirection, cp.getDistance() };
+            return 0;
+        }
+
+        std::vector<Contact> mContacts;
+
+    private:
+        const btCollisionObject* mActor;
+    };
 
     osg::Vec3f interpolateMovements(const MWPhysics::PtrHolder& ptr, float timeAccum, float physicsDt)
     {
@@ -400,11 +451,12 @@ namespace MWPhysics
     };
 
     PhysicsTaskScheduler::PhysicsTaskScheduler(
-        float physicsDt, btCollisionWorld* collisionWorld, MWRender::DebugDrawer* debugDrawer)
+        float physicsDt, btDiscreteDynamicsWorld* dynamicsWorld, MWRender::DebugDrawer* debugDrawer)
         : mDefaultPhysicsDt(physicsDt)
         , mPhysicsDt(physicsDt)
         , mTimeAccum(0.f)
-        , mCollisionWorld(collisionWorld)
+        , mCollisionWorld(dynamicsWorld)
+        , mDynamicsWorld(dynamicsWorld)
         , mDebugDrawer(debugDrawer)
         , mLockingPolicy(detectLockingPolicy())
         , mNumThreads(getNumThreads(mLockingPolicy))
@@ -658,10 +710,20 @@ namespace MWPhysics
         mCollisionWorld->addCollisionObject(collisionObject, collisionFilterGroup, collisionFilterMask);
     }
 
+    void PhysicsTaskScheduler::addRigidBody(btRigidBody* body, int collisionFilterGroup, int collisionFilterMask)
+    {
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        mCollisionObjects.insert(body);
+        mDynamicsWorld->addRigidBody(body, collisionFilterGroup, collisionFilterMask);
+        ++mNumRigidBodies;
+    }
+
     void PhysicsTaskScheduler::removeCollisionObject(btCollisionObject* collisionObject)
     {
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
         mCollisionObjects.erase(collisionObject);
+        if (btRigidBody::upcast(collisionObject) != nullptr)
+            --mNumRigidBodies;
         mCollisionWorld->removeCollisionObject(collisionObject);
     }
 
@@ -858,8 +920,78 @@ namespace MWPhysics
         {
             --mRemainingSteps;
             updateActorsPositions();
+            pushDynamicObjects();
+            stepDynamics();
         }
         mNextJob.store(0, std::memory_order_release);
+    }
+
+    void PhysicsTaskScheduler::pushDynamicObjects()
+    {
+        if (mNumRigidBodies == 0)
+            return;
+
+        // Locked actors must outlive the collision world lock (see WithLockedPtr).
+        std::vector<std::shared_ptr<Actor>> actors;
+        for (auto& sim : *mSimulations)
+            if (auto* actorSim = std::get_if<ActorSimulation>(&sim))
+                if (auto locked = actorSim->lock())
+                    actors.push_back(std::move(locked->first));
+
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        for (const auto& actor : actors)
+        {
+            const osg::Vec3f displacement = actor->getPosition() - actor->getPreviousPosition();
+            btVector3 actorVelocity = Misc::Convert::toBullet(displacement) / mPhysicsDt;
+            if (actorVelocity.length2() < 1.f)
+                continue;
+            // Teleports also show up as displacement; don't fling things across the room.
+            constexpr btScalar maxPushSpeed = 1000.f;
+            if (actorVelocity.length2() > maxPushSpeed * maxPushSpeed)
+                actorVelocity *= maxPushSpeed / actorVelocity.length();
+
+            // Actors walk through dynamic objects (their movement ignores them); any object the actor now
+            // overlaps gets shoved so the point of contact keeps up with the actor.
+            DynamicContactCallback callback(actor->getCollisionObject());
+            ContactTestWrapper::contactTest(mCollisionWorld, actor->getCollisionObject(), callback);
+            if (!callback.mContacts.empty())
+                Log(Debug::Info) << "[physics] actor touches " << callback.mContacts.size() << " dynamic objects";
+            for (const auto& contact : callback.mContacts)
+            {
+                // Push horizontally, away from the actor. If the contact is (nearly) vertical, e.g. the actor is
+                // stepping over the object, push it along the actor's direction of movement instead.
+                btVector3 direction = contact.mPushDirection;
+                direction.setZ(0);
+                if (direction.length2() < 0.25f)
+                    direction = btVector3(actorVelocity.x(), actorVelocity.y(), 0);
+                if (direction.length2() < 1e-4f)
+                    continue;
+                direction.normalize();
+
+                const btScalar approach = actorVelocity.dot(direction);
+                if (approach <= 0)
+                    continue;
+                const btVector3 relativePoint = contact.mPoint - contact.mBody->getCenterOfMassPosition();
+                const btScalar deficit = approach - contact.mBody->getVelocityInLocalPoint(relativePoint).dot(direction);
+                if (deficit <= 0)
+                    continue;
+
+                contact.mBody->activate(true);
+                contact.mBody->applyImpulse(direction * (deficit / contact.mBody->getInvMass()), relativePoint);
+                Log(Debug::Info) << "[physics] push: deficit " << deficit << " normal ("
+                                 << contact.mPushDirection.x() << ", " << contact.mPushDirection.y() << ", "
+                                 << contact.mPushDirection.z() << ")";
+            }
+        }
+    }
+
+    void PhysicsTaskScheduler::stepDynamics()
+    {
+        if (mNumRigidBodies == 0)
+            return;
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        // We are already called once per fixed physics step, so no substepping.
+        mDynamicsWorld->stepSimulation(mPhysicsDt, 0);
     }
 
     void PhysicsTaskScheduler::afterPostSim()

@@ -1,5 +1,7 @@
 #include "misc.hpp"
 
+#include <algorithm>
+
 #include <MyGUI_TextIterator.h>
 #include <MyGUI_UString.h>
 
@@ -23,6 +25,8 @@
 
 #include "../mwrender/objects.hpp"
 #include "../mwrender/renderinginterface.hpp"
+
+#include "../mwphysics/physicssystem.hpp"
 
 #include "classmodel.hpp"
 #include "nameorid.hpp"
@@ -48,6 +52,26 @@ namespace MWClass
         {
             renderingInterface.getObjects().insertModel(ptr, model);
         }
+    }
+
+    void Miscellaneous::insertObject(const MWWorld::Ptr& ptr, const std::string& model, const osg::Quat& rotation,
+        MWPhysics::PhysicsSystem& physics) const
+    {
+        insertObjectPhysics(ptr, model, rotation, physics);
+    }
+
+    void Miscellaneous::insertObjectPhysics(const MWWorld::Ptr& ptr, const std::string& model,
+        const osg::Quat& rotation, MWPhysics::PhysicsSystem& physics) const
+    {
+        // Physics prototype: only bottles are simulated for now.
+        if (model.empty() || !ptr.getCellRef().getRefId().contains("bottle"))
+            return;
+        const MWWorld::LiveCellRef<ESM::Miscellaneous>* ref = ptr.get<ESM::Miscellaneous>();
+        const float mass = std::clamp(ref->mBase->mData.mWeight, 0.2f, 50.f);
+        // Script-placed objects normally get collision only after the next cell change. Simulated objects
+        // need it right away, or they would just hang in the air.
+        ptr.mRef->mData.mPhysicsPostponed = false;
+        physics.addDynamicObject(ptr, VFS::Path::toNormalized(model), rotation, mass);
     }
 
     VFS::Path::NormalizedView Miscellaneous::getModel(const MWWorld::ConstPtr& ptr) const

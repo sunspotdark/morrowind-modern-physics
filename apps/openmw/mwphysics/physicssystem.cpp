@@ -15,6 +15,9 @@
 #include <BulletCollision/CollisionShapes/btConeShape.h>
 #include <BulletCollision/CollisionShapes/btSphereShape.h>
 #include <BulletCollision/CollisionShapes/btStaticPlaneShape.h>
+#include <BulletDynamics/ConstraintSolver/btSequentialImpulseConstraintSolver.h>
+#include <BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h>
+#include <BulletDynamics/Dynamics/btRigidBody.h>
 
 #include <LinearMath/btQuickprof.h>
 #include <LinearMath/btVector3.h>
@@ -22,6 +25,7 @@
 #include <components/debug/debuglog.hpp>
 #include <components/esm3/loadgmst.hpp>
 #include <components/esm3/loadmgef.hpp>
+#include <components/misc/constants.hpp>
 #include <components/misc/convert.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <components/misc/strings/conversion.hpp>
@@ -30,6 +34,7 @@
 #include <components/settings/values.hpp>
 
 #include "../mwbase/environment.hpp"
+#include "../mwbase/rotationflags.hpp"
 #include "../mwbase/world.hpp"
 
 #include "../mwmechanics/actorutil.hpp"
@@ -88,6 +93,60 @@ namespace
         ptr.getClass().getMovementSettings(ptr).mPosition[2] = 0;
     }
 
+    // Only pairs involving a simulated rigid body are of interest to the dynamics step. Everything else
+    // (actors vs. world, statics vs. statics) is handled by explicit queries, so keep it out of the pair cache.
+    struct DynamicPairFilter final : public btOverlapFilterCallback
+    {
+        bool needBroadphaseCollision(btBroadphaseProxy* proxy0, btBroadphaseProxy* proxy1) const override
+        {
+            if (((proxy0->m_collisionFilterGroup | proxy1->m_collisionFilterGroup) & MWPhysics::CollisionType_Dynamic)
+                == 0)
+                return false;
+            return (proxy0->m_collisionFilterGroup & proxy1->m_collisionFilterMask) != 0
+                && (proxy1->m_collisionFilterGroup & proxy0->m_collisionFilterMask) != 0;
+        }
+    };
+
+    class DynamicsWorld final : public btDiscreteDynamicsWorld
+    {
+    public:
+        using btDiscreteDynamicsWorld::btDiscreteDynamicsWorld;
+
+        // The default updates the AABB of every active collision object each step. Static objects keep
+        // their AABBs updated manually, so only refresh the moving rigid bodies.
+        void updateAabbs() override
+        {
+            for (int i = 0; i < m_nonStaticRigidBodies.size(); ++i)
+            {
+                btRigidBody* body = m_nonStaticRigidBodies[i];
+                if (body->isActive())
+                    updateSingleAabb(body);
+            }
+        }
+    };
+
+    // Inverse of Misc::Convert::makeOsgQuat: returns the ESM rotation (x, y, z) that produces the given quaternion.
+    // makeOsgQuat(rot) is the rotation Rx(-x) * Ry(-y) * Rz(-z) (applied right to left).
+    osg::Vec3f toEsmRotation(const osg::Quat& quat)
+    {
+        const btMatrix3x3 m(Misc::Convert::toBullet(quat));
+        const btScalar sinB = std::clamp(m[0][2], btScalar(-1), btScalar(1));
+        const btScalar b = std::asin(sinB);
+        btScalar a;
+        btScalar c;
+        if (std::abs(sinB) < 0.9999999)
+        {
+            a = std::atan2(-m[1][2], m[2][2]);
+            c = std::atan2(-m[0][1], m[0][0]);
+        }
+        else
+        {
+            // Gimbal lock: only a + c (or a - c) is determined, so put it all in a.
+            a = std::atan2(m[2][1], m[1][1]);
+            c = 0;
+        }
+        return osg::Vec3f(static_cast<float>(-a), static_cast<float>(-b), static_cast<float>(-c));
+    }
 }
 
 namespace MWPhysics
@@ -110,9 +169,13 @@ namespace MWPhysics
         mCollisionConfiguration = std::make_unique<btDefaultCollisionConfiguration>();
         mDispatcher = std::make_unique<btCollisionDispatcher>(mCollisionConfiguration.get());
         mBroadphase = std::make_unique<btDbvtBroadphase>();
+        mOverlapFilter = std::make_unique<DynamicPairFilter>();
+        mBroadphase->getOverlappingPairCache()->setOverlapFilterCallback(mOverlapFilter.get());
+        mConstraintSolver = std::make_unique<btSequentialImpulseConstraintSolver>();
 
-        mCollisionWorld
-            = std::make_unique<btCollisionWorld>(mDispatcher.get(), mBroadphase.get(), mCollisionConfiguration.get());
+        mCollisionWorld = std::make_unique<DynamicsWorld>(
+            mDispatcher.get(), mBroadphase.get(), mConstraintSolver.get(), mCollisionConfiguration.get());
+        mCollisionWorld->setGravity(btVector3(0, 0, -Constants::GravityConst * Constants::UnitsPerMeter));
 
         // Don't update AABBs of all objects every frame. Most objects in MW are static, so we don't need this.
         // Should a "static" object ever be moved, we have to update its AABB manually using
@@ -143,6 +206,7 @@ namespace MWPhysics
 
         mTaskScheduler->releaseSharedStates();
         mHeightFields.clear();
+        mDynamicObjects.clear();
         mObjects.clear();
         mActors.clear();
         mProjectiles.clear();
@@ -439,11 +503,38 @@ namespace MWPhysics
             mAnimatedObjects.emplace(obj.get(), false);
     }
 
+    void PhysicsSystem::addDynamicObject(
+        const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation, float mass)
+    {
+        if (ptr.mRef->mData.mPhysicsPostponed)
+            return;
+
+        std::shared_ptr<Resource::BulletShapeInstance> shapeInstance = mShapeManager->getInstance(mesh);
+        if (!shapeInstance || !shapeInstance->mCollisionShape)
+        {
+            Log(Debug::Warning) << "No collision shape for dynamic object " << ptr.toString() << " (" << mesh.value()
+                                << ")";
+            return;
+        }
+
+        assert(!getObject(ptr));
+
+        auto obj = std::make_shared<Object>(ptr, shapeInstance, rotation, mass, mTaskScheduler.get());
+        Log(Debug::Info) << "[physics] added dynamic object " << ptr.toString() << " mass " << mass << " at "
+                         << obj->getRigidBody()->getCenterOfMassPosition().x() << ", "
+                         << obj->getRigidBody()->getCenterOfMassPosition().y() << ", "
+                         << obj->getRigidBody()->getCenterOfMassPosition().z();
+        mObjects.emplace(ptr.mRef, obj);
+        mDynamicObjects.push_back(std::move(obj));
+    }
+
     void PhysicsSystem::remove(const MWWorld::Ptr& ptr)
     {
         if (auto foundObject = mObjects.find(ptr.mRef); foundObject != mObjects.end())
         {
             mAnimatedObjects.erase(foundObject->second.get());
+            if (foundObject->second->isDynamic())
+                std::erase(mDynamicObjects, foundObject->second);
 
             mObjects.erase(foundObject);
         }
@@ -531,6 +622,9 @@ namespace MWPhysics
     {
         if (auto foundObject = mObjects.find(ptr.mRef); foundObject != mObjects.end())
         {
+            // The simulation is the source of this rotation; don't feed it back.
+            if (mMovingDynamicObjects && foundObject->second->isDynamic())
+                return;
             foundObject->second->setRotation(rotate);
             mTaskScheduler->updateSingleAabb(foundObject->second);
         }
@@ -548,6 +642,8 @@ namespace MWPhysics
     {
         if (auto foundObject = mObjects.find(ptr.mRef); foundObject != mObjects.end())
         {
+            if (mMovingDynamicObjects && foundObject->second->isDynamic())
+                return;
             foundObject->second->updatePosition();
             mTaskScheduler->updateSingleAabb(foundObject->second);
         }
@@ -752,6 +848,28 @@ namespace MWPhysics
 
         if (player != nullptr)
             world->moveObject(player->getPtr(), player->getSimulationPosition(), false, false);
+
+        moveDynamicObjects();
+    }
+
+    void PhysicsSystem::moveDynamicObjects()
+    {
+        if (mDynamicObjects.empty())
+            return;
+
+        const auto world = MWBase::Environment::get().getWorld();
+        // Moving an object out of the active cells removes it from mDynamicObjects; iterate over a copy.
+        const std::vector<std::shared_ptr<Object>> objects = mDynamicObjects;
+        mMovingDynamicObjects = true;
+        for (const auto& object : objects)
+        {
+            const auto transform = object->takeSimulatedTransform();
+            if (!transform)
+                continue;
+            const MWWorld::Ptr ptr = world->moveObject(object->getPtr(), transform->first, false, false);
+            world->rotateObject(ptr, toEsmRotation(transform->second), MWBase::RotationFlag_none);
+        }
+        mMovingDynamicObjects = false;
     }
 
     void PhysicsSystem::updateAnimatedCollisionShape(const MWWorld::Ptr& object)

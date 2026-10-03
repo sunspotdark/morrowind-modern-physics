@@ -162,7 +162,11 @@ namespace
             const DetourNavigator::ObjectTransform objectTransform{ ptr.getRefData().getPosition(),
                 ptr.getCellRef().getScale() };
 
-            if (ptr.getClass().isDoor() && !ptr.getCellRef().getTeleport())
+            if (object->isDynamic())
+            {
+                // Moving clutter is not part of the navmesh.
+            }
+            else if (ptr.getClass().isDoor() && !ptr.getCellRef().getTeleport())
             {
                 btVector3 aabbMin;
                 btVector3 aabbMax;

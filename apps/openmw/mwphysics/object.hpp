@@ -9,6 +9,10 @@
 
 #include <map>
 #include <mutex>
+#include <optional>
+
+class btCollisionShape;
+class btRigidBody;
 
 namespace Resource
 {
@@ -18,6 +22,7 @@ namespace Resource
 namespace MWPhysics
 {
     class PhysicsTaskScheduler;
+    class DynamicMotionState;
 
     enum ScriptedCollisionType : char
     {
@@ -32,7 +37,17 @@ namespace MWPhysics
     public:
         Object(const MWWorld::Ptr& ptr, std::shared_ptr<Resource::BulletShapeInstance> shapeInstance,
             osg::Quat rotation, int collisionType, PhysicsTaskScheduler* scheduler);
+        /// Construct a simulated rigid body with the given mass.
+        Object(const MWWorld::Ptr& ptr, std::shared_ptr<Resource::BulletShapeInstance> shapeInstance,
+            osg::Quat rotation, float mass, PhysicsTaskScheduler* scheduler);
         ~Object() override;
+
+        bool isDynamic() const { return mRigidBody != nullptr; }
+        btRigidBody* getRigidBody() const { return mRigidBody; }
+
+        /// For dynamic objects: if the simulation moved the body since the last call, return the
+        /// new position and rotation of the object's origin (as opposed to its center of mass).
+        std::optional<std::pair<osg::Vec3f, osg::Quat>> takeSimulatedTransform();
 
         const std::shared_ptr<Resource::BulletShapeInstance>& getShapeInstance() const;
         void setScale(float scale);
@@ -63,6 +78,12 @@ namespace MWPhysics
         mutable std::mutex mPositionMutex;
         PhysicsTaskScheduler* mTaskScheduler;
         char mCollidedWith;
+
+        // Dynamic objects only
+        std::unique_ptr<btCollisionShape> mDynamicShape;
+        std::unique_ptr<DynamicMotionState> mMotionState;
+        btRigidBody* mRigidBody = nullptr; // same object as mCollisionObject
+        btVector3 mCenterOffset; // center of mass relative to object origin, in object space
     };
 }
 

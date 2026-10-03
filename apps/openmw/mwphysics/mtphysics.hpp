@@ -12,6 +12,9 @@
 
 #include <BulletCollision/CollisionDispatch/btCollisionWorld.h>
 
+class btDiscreteDynamicsWorld;
+class btRigidBody;
+
 #include <osg/Timer>
 
 #include "components/misc/budgetmeasurement.hpp"
@@ -40,7 +43,8 @@ namespace MWPhysics
     class PhysicsTaskScheduler
     {
     public:
-        PhysicsTaskScheduler(float physicsDt, btCollisionWorld* collisionWorld, MWRender::DebugDrawer* debugDrawer);
+        PhysicsTaskScheduler(
+            float physicsDt, btDiscreteDynamicsWorld* dynamicsWorld, MWRender::DebugDrawer* debugDrawer);
         ~PhysicsTaskScheduler();
 
         /// @brief move actors taking into account desired movements and collisions
@@ -64,6 +68,7 @@ namespace MWPhysics
         void getAabb(const btCollisionObject* obj, btVector3& min, btVector3& max);
         void setCollisionFilterMask(btCollisionObject* collisionObject, int collisionFilterMask);
         void addCollisionObject(btCollisionObject* collisionObject, int collisionFilterGroup, int collisionFilterMask);
+        void addRigidBody(btRigidBody* body, int collisionFilterGroup, int collisionFilterMask);
         void removeCollisionObject(btCollisionObject* collisionObject);
         void updateSingleAabb(const std::shared_ptr<PtrHolder>& ptr, bool immediate = false);
         bool getLineOfSight(const std::shared_ptr<Actor>& actor1, const std::shared_ptr<Actor>& actor2);
@@ -87,6 +92,8 @@ namespace MWPhysics
         void afterPreStep();
         void afterPostStep();
         void afterPostSim();
+        void pushDynamicObjects();
+        void stepDynamics();
         void syncWithMainThread();
         void waitForWorkers();
         void prepareWork(float& timeAccum, std::vector<Simulation>& simulations, osg::Timer_t frameStart,
@@ -99,6 +106,8 @@ namespace MWPhysics
         float mPhysicsDt;
         float mTimeAccum;
         btCollisionWorld* mCollisionWorld;
+        btDiscreteDynamicsWorld* mDynamicsWorld; // same object as mCollisionWorld
+        int mNumRigidBodies = 0;
         MWRender::DebugDrawer* mDebugDrawer;
         std::vector<LOSRequest> mLOSCache;
         std::set<std::weak_ptr<PtrHolder>, std::owner_less<std::weak_ptr<PtrHolder>>> mUpdateAabb;

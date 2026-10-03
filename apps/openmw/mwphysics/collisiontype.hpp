@@ -17,7 +17,10 @@ namespace MWPhysics
         CollisionType_AnyPhysical = CollisionType_World | CollisionType_HeightMap | CollisionType_Actor
             | CollisionType_Door | CollisionType_Projectile | CollisionType_Water,
         CollisionType_CameraOnly = 1 << 6,
-        CollisionType_VisualOnly = 1 << 7
+        CollisionType_VisualOnly = 1 << 7,
+        // Simulated rigid bodies (knockable clutter). Deliberately not part of CollisionType_Default or
+        // CollisionType_AnyPhysical so existing queries and actor movement ignore them.
+        CollisionType_Dynamic = 1 << 8
     };
 
 }
