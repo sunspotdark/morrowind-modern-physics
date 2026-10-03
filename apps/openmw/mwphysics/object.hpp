@@ -78,6 +78,14 @@ namespace MWPhysics
         void requestWake();
         void requestSleep();
         void requestVelocity(const osg::Vec3f& velocity);
+        /// Stuck objects (an arrow in a wall) don't move at all, as if part of what they're stuck in, until
+        /// unstuck. Applied by the scheduler, which owns the dynamics world.
+        void requestStuck(bool stuck);
+        std::optional<bool> takePendingStuck();
+        bool isStuck() const { return mStuck; }
+        void setStuckFlag(bool stuck) { mStuck = stuck; }
+        float getMass() const { return mMass; }
+        const btVector3& getLocalInertia() const { return mLocalInertia; }
 
         /// For dynamic objects: where it was last placed by the game (not the simulation).
         osg::Vec3f getPlacedPosition() const;
@@ -132,6 +140,10 @@ namespace MWPhysics
         PendingActivation mPendingActivation = PendingActivation::None;
         std::optional<osg::Vec3f> mPendingVelocity;
         float mRelativeDensity = 1.f;
+        float mMass = 0.f;
+        btVector3 mLocalInertia{ 0, 0, 0 };
+        bool mStuck = false;
+        std::optional<bool> mPendingStuck;
     };
 }
 

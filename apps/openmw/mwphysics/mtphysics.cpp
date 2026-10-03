@@ -890,6 +890,8 @@ namespace MWPhysics
         else if (const auto object = std::dynamic_pointer_cast<Object>(ptr))
         {
             object->commitPositionChange();
+            if (const std::optional<bool> stuck = object->takePendingStuck())
+                setStuckUnsafe(*object, *stuck);
             mCollisionWorld->updateSingleAabb(object->getCollisionObject());
             if (btCollisionObject* detail = object->getDetailCollisionObject())
                 mCollisionWorld->updateSingleAabb(detail);
@@ -1052,8 +1054,8 @@ namespace MWPhysics
             ContactTestWrapper::contactTest(mCollisionWorld, actor->getCollisionObject(), callback);
             for (const auto& contact : callback.mContacts)
             {
-                // A carried object is steered by the carrier, not shoved.
-                if (held != nullptr && contact.mBody == held->getRigidBody())
+                // A carried object is steered by the carrier, not shoved; a stuck one doesn't budge.
+                if ((held != nullptr && contact.mBody == held->getRigidBody()) || contact.mBody->getInvMass() == 0)
                     continue;
 
                 // Push horizontally, away from the actor. If the contact is (nearly) vertical, e.g. the actor is
@@ -1295,6 +1297,8 @@ namespace MWPhysics
         releaseHeldObject(std::nullopt);
 
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        // Grabbing is how stuck things (arrows in a wall) come loose.
+        setStuckUnsafe(*object, false);
         btRigidBody& body = *object->getRigidBody();
         body.setActivationState(DISABLE_DEACTIVATION);
         body.setGravity(btVector3(0, 0, 0));
@@ -1341,6 +1345,34 @@ namespace MWPhysics
             if (current.length2() > maxDropSpeed * maxDropSpeed)
                 body.setLinearVelocity(current * (maxDropSpeed / current.length()));
         }
+    }
+
+    void PhysicsTaskScheduler::setStuckUnsafe(Object& object, bool stuck)
+    {
+        // Called with the collision world locked. A stuck object is static (no mass): nothing moves it, things
+        // bounce off it. Changing that means taking it out of the world and putting it back.
+        if (object.isStuck() == stuck || object.getRigidBody() == nullptr)
+            return;
+        btRigidBody& body = *object.getRigidBody();
+        const int group = body.getBroadphaseHandle()->m_collisionFilterGroup;
+        const int mask = body.getBroadphaseHandle()->m_collisionFilterMask;
+        mDynamicsWorld->removeRigidBody(&body);
+        body.setLinearVelocity(btVector3(0, 0, 0));
+        body.setAngularVelocity(btVector3(0, 0, 0));
+        if (stuck)
+            body.setMassProps(0, btVector3(0, 0, 0));
+        else
+        {
+            body.setMassProps(object.getMass(), object.getLocalInertia());
+            body.updateInertiaTensor();
+        }
+        mDynamicsWorld->addRigidBody(&body, group, mask);
+        if (!stuck)
+        {
+            body.setGravity(mDynamicsWorld->getGravity());
+            body.forceActivationState(ACTIVE_TAG);
+        }
+        object.setStuckFlag(stuck);
     }
 
     void PhysicsTaskScheduler::freeWedgedObjectUnsafe(const std::shared_ptr<Object>& object)
@@ -1412,7 +1444,8 @@ namespace MWPhysics
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
         for (const Strike& strike : strikes)
         {
-            if (strike.mObject == held)
+            // Stuck objects only come loose when grabbed.
+            if (strike.mObject == held || strike.mObject->isStuck())
                 continue;
             btRigidBody& body = *strike.mObject->getRigidBody();
             body.activate(true);

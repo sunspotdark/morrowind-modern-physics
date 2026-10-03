@@ -130,6 +130,7 @@ namespace MWPhysics
         void releaseHeldObjectUnsafe(btRigidBody& body, const std::optional<btVector3>& velocity);
         void applyWaterForces(float waterHeight);
         void freeWedgedObjectUnsafe(const std::shared_ptr<Object>& object);
+        void setStuckUnsafe(Object& object, bool stuck);
         void updateWedgedObjects(const std::vector<std::shared_ptr<Object>>& objects);
         struct FlyingObject
         {

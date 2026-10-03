@@ -644,7 +644,8 @@ namespace MWPhysics
     }
 
     void PhysicsSystem::addDynamicObject(
-        const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation, float mass, bool metal)
+        const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation, float mass, bool metal,
+        bool projectile)
     {
         if (ptr.mRef->mData.mPhysicsPostponed)
             return;
@@ -666,6 +667,19 @@ namespace MWPhysics
             = getHullPoints(mesh, visible != nullptr ? *visible : *shapeInstance->getSource());
         auto obj = std::make_shared<Object>(
             ptr, shapeInstance, rotation, mass, metal, hullPoints, mTaskScheduler.get());
+
+        // Whether ammunition was stuck in something isn't saved, but it shows: it is embedded in the surface.
+        if (projectile)
+        {
+            DepenetrationCallback embedded(obj->getCollisionObject());
+            mTaskScheduler->contactTest(obj->getCollisionObject(), embedded);
+            constexpr btScalar minStuckDepth = 1.5f;
+            if (embedded.mDeepest > minStuckDepth)
+            {
+                obj->requestStuck(true);
+                mTaskScheduler->updateSingleAabb(obj);
+            }
+        }
 
         mObjects.emplace(ptr.mRef, obj);
         mDynamicObjects.push_back(std::move(obj));
@@ -697,9 +711,9 @@ namespace MWPhysics
         const osg::Vec3f origin = hitPoint + forward * depth - forward * tip;
         MWBase::Environment::get().getWorld()->moveObject(ptr, origin, false, false);
 
-        // Exactly there (no placing on surfaces: it's meant to be embedded), and asleep.
+        // Exactly there (no placing on surfaces: it's meant to be embedded), and fixed until taken or grabbed.
         object.updatePosition();
-        object.requestSleep();
+        object.requestStuck(true);
         mTaskScheduler->updateSingleAabb(found->second);
     }
 

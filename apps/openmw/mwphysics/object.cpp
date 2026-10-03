@@ -146,6 +146,8 @@ namespace MWPhysics
 
         btVector3 inertia(0, 0, 0);
         mDynamicShape->calculateLocalInertia(mass, inertia);
+        mMass = mass;
+        mLocalInertia = inertia;
 
         const btTransform centerOfMass = getTransform() * btTransform(btQuaternion::getIdentity(), mCenterOffset);
         mMotionState = std::make_unique<DynamicMotionState>(centerOfMass);
@@ -239,6 +241,18 @@ namespace MWPhysics
     {
         std::unique_lock<std::mutex> lock(mPositionMutex);
         mPendingVelocity = velocity;
+    }
+
+    void Object::requestStuck(bool stuck)
+    {
+        std::unique_lock<std::mutex> lock(mPositionMutex);
+        mPendingStuck = stuck;
+    }
+
+    std::optional<bool> Object::takePendingStuck()
+    {
+        std::unique_lock<std::mutex> lock(mPositionMutex);
+        return std::exchange(mPendingStuck, std::nullopt);
     }
 
     osg::Vec3f Object::getPlacedPosition() const
