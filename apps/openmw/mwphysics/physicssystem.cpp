@@ -713,7 +713,7 @@ namespace MWPhysics
         const auto found = mRagdolls.find(actor.mRef);
         if (found == mRagdolls.end())
             return {};
-        return found->second->getBonePoses();
+        return found->second->getBonePoses(std::clamp(mTimeAccum / mPhysicsDt, 0.f, 1.f));
     }
 
     void PhysicsSystem::removeRagdoll(const MWWorld::ConstPtr& actor)
@@ -810,7 +810,7 @@ namespace MWPhysics
             mHoldDistance = 70.f;
             mHoldingRagdoll = true;
             // Gripped firmly enough to drag the rest of the body along; it hangs as it likes.
-            constexpr btScalar gripMass = 60.f;
+            constexpr btScalar gripMass = 30.f;
             mTaskScheduler->holdObject(part, false, gripMass);
             return true;
         }

@@ -25,6 +25,7 @@ namespace MWPhysics
     public:
         explicit RagdollMotionState(const btTransform& transform)
             : mTransform(transform)
+            , mPreviousTransform(transform)
         {
         }
 
@@ -37,12 +38,22 @@ namespace MWPhysics
         void setWorldTransform(const btTransform& transform) override
         {
             std::lock_guard lock(mMutex);
+            mPreviousTransform = mTransform;
             mTransform = transform;
+        }
+
+        /// Between the last two physics steps: 0 is the one before, 1 the latest.
+        btTransform getInterpolatedTransform(btScalar factor) const
+        {
+            std::lock_guard lock(mMutex);
+            return btTransform(mPreviousTransform.getRotation().slerp(mTransform.getRotation(), factor),
+                mPreviousTransform.getOrigin().lerp(mTransform.getOrigin(), factor));
         }
 
     private:
         mutable std::mutex mMutex;
         btTransform mTransform;
+        btTransform mPreviousTransform;
     };
 
     struct Ragdoll::Part final : public PtrHolder
@@ -158,8 +169,8 @@ namespace MWPhysics
                 def.mMass, part->mMotionState.get(), part->mShape.get(), inertia);
             info.m_friction = 0.8f;
             info.m_restitution = 0.05f;
-            info.m_linearDamping = 0.05f;
-            info.m_angularDamping = 0.5f;
+            info.m_linearDamping = 0.15f;
+            info.m_angularDamping = 0.7f;
             // In game units (~70 per meter), like the other simulated objects.
             info.m_linearSleepingThreshold = 4.f;
             info.m_angularSleepingThreshold = 1.f;
@@ -221,14 +232,13 @@ namespace MWPhysics
             mTaskScheduler->removeCollisionObject(part->mBody);
     }
 
-    std::vector<std::pair<std::string, osg::Matrixf>> Ragdoll::getBonePoses() const
+    std::vector<std::pair<std::string, osg::Matrixf>> Ragdoll::getBonePoses(float interpolation) const
     {
         std::vector<std::pair<std::string, osg::Matrixf>> poses;
         poses.reserve(mParts.size());
         for (const auto& part : mParts)
         {
-            btTransform bodyWorld;
-            part->mMotionState->getWorldTransform(bodyWorld);
+            const btTransform bodyWorld = part->mMotionState->getInterpolatedTransform(interpolation);
             const btTransform bone = bodyWorld * part->mBoneFromBody;
             poses.emplace_back(part->mBone,
                 osg::Matrixf::scale(part->mBoneScale) * osg::Matrixf::rotate(Misc::Convert::toOsg(bone.getRotation()))

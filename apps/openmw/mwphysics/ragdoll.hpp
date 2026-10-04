@@ -40,8 +40,9 @@ namespace MWPhysics
             const osg::Vec3f& kick, PhysicsTaskScheduler* scheduler);
         ~Ragdoll();
 
-        /// Where the simulated bones are now (world matrices), parents first.
-        std::vector<std::pair<std::string, osg::Matrixf>> getBonePoses() const;
+        /// Where the simulated bones are now (world matrices), parents first. Interpolation is how far the time
+        /// since the last physics step is to the next one, for smooth movement at any frame rate.
+        std::vector<std::pair<std::string, osg::Matrixf>> getBonePoses(float interpolation) const;
 
         void updatePtr(const MWWorld::Ptr& updated);
 

@@ -1047,6 +1047,8 @@ namespace MWPhysics
                 if (auto locked = actorSim->lock())
                     actors.push_back(std::move(locked->first));
         const std::shared_ptr<PtrHolder> held = getHeldObject();
+        // Of a held ragdoll, all of it (the carrier would trip over the body it drags).
+        const MWWorld::LiveCellRefBase* const heldRef = held != nullptr ? held->getPtr().mRef : nullptr;
 
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
         for (const auto& actor : actors)
@@ -1068,6 +1070,9 @@ namespace MWPhysics
             {
                 // A carried object is steered by the carrier, not shoved; a stuck one doesn't budge.
                 if ((held != nullptr && contact.mBody == held->getCollisionObject()) || contact.mBody->getInvMass() == 0)
+                    continue;
+                if (const auto* holder = static_cast<const PtrHolder*>(contact.mBody->getUserPointer());
+                    heldRef != nullptr && holder != nullptr && holder->getPtr().mRef == heldRef)
                     continue;
 
                 // Push horizontally, away from the actor. If the contact is (nearly) vertical, e.g. the actor is
@@ -1143,9 +1148,11 @@ namespace MWPhysics
             }
             else
             {
-                // Close most of the remaining gap each step; collisions still stop the object.
-                btVector3 velocity = offset * (0.5f / mPhysicsDt);
-                constexpr btScalar maxCarrySpeed = 2000.f;
+                // Close most of the remaining gap each step; collisions still stop the object. Something jointed
+                // (a ragdoll limb, not steered to an orientation) follows more loosely, so it doesn't fight its
+                // joints or jerk with every bob of the carrier's head.
+                btVector3 velocity = offset * ((steerRotation ? 0.5f : 0.12f) / mPhysicsDt);
+                const btScalar maxCarrySpeed = steerRotation ? 2000.f : 500.f;
                 if (velocity.length2() > maxCarrySpeed * maxCarrySpeed)
                     velocity *= maxCarrySpeed / velocity.length();
                 body.setLinearVelocity(velocity);
