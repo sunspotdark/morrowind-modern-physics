@@ -217,7 +217,8 @@ namespace MWPhysics
 
         // Carrying simulated objects (one at a time)
         bool canHoldObject(const MWWorld::ConstPtr& ptr) const;
-        bool holdObject(const MWWorld::Ptr& ptr, const osg::Vec3f& viewDirection);
+        /// A corpse with a ragdoll is held by the part nearest the view (dragged along, not carried).
+        bool holdObject(const MWWorld::Ptr& ptr, const osg::Vec3f& eye, const osg::Vec3f& viewDirection);
         /// Keep the held object in front of a viewer at eye, looking along direction (normalized).
         void setHoldView(const osg::Vec3f& eye, const osg::Vec3f& direction);
         /// Turn the held object relative to the viewer (radians).
@@ -402,6 +403,7 @@ namespace MWPhysics
         bool mMovingDynamicObjects = false;
         float mHoldDistance = 0;
         btQuaternion mHoldRelativeRotation;
+        bool mHoldingRagdoll = false;
         std::unordered_map<std::string, std::vector<btVector3>> mHullCache;
         std::set<std::string, std::less<>> mWarnedNoShape;
 

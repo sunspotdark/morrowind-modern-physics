@@ -45,11 +45,14 @@ namespace MWPhysics
 
         void updatePtr(const MWWorld::Ptr& updated);
 
+        /// The part closest to a view ray from eye along direction (normalized), for grabbing.
+        std::shared_ptr<PtrHolder> findPart(const osg::Vec3f& eye, const osg::Vec3f& direction) const;
+
     private:
         struct Part;
 
         PhysicsTaskScheduler* mTaskScheduler;
-        std::vector<std::unique_ptr<Part>> mParts;
+        std::vector<std::shared_ptr<Part>> mParts; // shared: a part can be held (see PhysicsTaskScheduler)
         std::vector<std::unique_ptr<btTypedConstraint>> mJoints;
     };
 }

@@ -76,11 +76,13 @@ namespace MWPhysics
         void removeConstraint(btTypedConstraint* constraint);
 
         // Carrying a dynamic object: each physics step it is steered towards the hold target.
-        void holdObject(const std::shared_ptr<Object>& object);
+        /// steerRotation: also turn it to the target orientation. holdMass: if set, its mass while held (a heavier
+        /// grip drags what it is jointed to, e.g. the rest of a ragdoll).
+        void holdObject(const std::shared_ptr<PtrHolder>& object, bool steerRotation, btScalar holdMass);
         void setHoldTarget(const btVector3& position, const btQuaternion& rotation);
         /// Let go of the held object, optionally setting its velocity (for throwing).
         void releaseHeldObject(const std::optional<btVector3>& velocity);
-        std::shared_ptr<Object> getHeldObject() const;
+        std::shared_ptr<PtrHolder> getHeldObject() const;
 
         /// Change the velocity of dynamic objects as if struck at a world point (velocityChange is independent
         /// of the object's mass). Ignores the held object.
@@ -158,7 +160,9 @@ namespace MWPhysics
         int mNumRigidBodies = 0;
         std::atomic<bool> mHasWater{ false };
         std::atomic<float> mWaterHeight{ 0.f };
-        std::weak_ptr<Object> mHeldObject;
+        std::weak_ptr<PtrHolder> mHeldObject;
+        bool mHoldSteerRotation = true;
+        btScalar mHeldRestoreMass = 0; // the mass to give back on release, if changed while held
         btVector3 mHoldTarget;
         btQuaternion mHoldTargetRotation;
         // Dynamic objects passing through statics they were wedged in (see freeWedgedObjectUnsafe).

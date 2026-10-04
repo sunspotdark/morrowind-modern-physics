@@ -1,6 +1,7 @@
 #include "ragdoll.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <mutex>
 #include <string_view>
 
@@ -123,7 +124,7 @@ namespace MWPhysics
 
         for (const PartDef& def : sPartDefs)
         {
-            auto part = std::make_unique<Part>(actor);
+            auto part = std::make_shared<Part>(actor);
             part->mBone = def.mBone;
 
             const osg::Vec3f start = position(def.mBone);
@@ -240,5 +241,25 @@ namespace MWPhysics
     {
         for (const auto& part : mParts)
             part->updatePtr(updated);
+    }
+
+    std::shared_ptr<PtrHolder> Ragdoll::findPart(const osg::Vec3f& eye, const osg::Vec3f& direction) const
+    {
+        std::shared_ptr<PtrHolder> best;
+        float bestDistance = std::numeric_limits<float>::max();
+        for (const auto& part : mParts)
+        {
+            btTransform bodyWorld;
+            part->mMotionState->getWorldTransform(bodyWorld);
+            const osg::Vec3f toCenter = Misc::Convert::toOsg(bodyWorld.getOrigin()) - eye;
+            const float along = std::max(toCenter * direction, 0.f);
+            const float distance = (toCenter - direction * along).length();
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = part;
+            }
+        }
+        return best;
     }
 }

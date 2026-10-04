@@ -1046,7 +1046,7 @@ namespace MWPhysics
             if (auto* actorSim = std::get_if<ActorSimulation>(&sim))
                 if (auto locked = actorSim->lock())
                     actors.push_back(std::move(locked->first));
-        const std::shared_ptr<Object> held = getHeldObject();
+        const std::shared_ptr<PtrHolder> held = getHeldObject();
 
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
         for (const auto& actor : actors)
@@ -1067,7 +1067,7 @@ namespace MWPhysics
             for (const auto& contact : callback.mContacts)
             {
                 // A carried object is steered by the carrier, not shoved; a stuck one doesn't budge.
-                if ((held != nullptr && contact.mBody == held->getRigidBody()) || contact.mBody->getInvMass() == 0)
+                if ((held != nullptr && contact.mBody == held->getCollisionObject()) || contact.mBody->getInvMass() == 0)
                     continue;
 
                 // Push horizontally, away from the actor. If the contact is (nearly) vertical, e.g. the actor is
@@ -1099,14 +1099,16 @@ namespace MWPhysics
             return;
 
         // Locked object must outlive the collision world lock (its destructor takes the lock).
-        std::shared_ptr<Object> held;
+        std::shared_ptr<PtrHolder> held;
         btVector3 holdTarget;
         btQuaternion holdTargetRotation;
+        bool steerRotation;
         {
             std::lock_guard heldLock(mHeldObjectMutex);
             held = mHeldObject.lock();
             holdTarget = mHoldTarget;
             holdTargetRotation = mHoldTargetRotation;
+            steerRotation = mHoldSteerRotation;
         }
         std::vector<std::shared_ptr<Object>> wedged;
         {
@@ -1127,9 +1129,9 @@ namespace MWPhysics
 
         updateWedgedObjects(wedged);
 
-        if (held != nullptr)
+        if (held != nullptr && btRigidBody::upcast(held->getCollisionObject()) != nullptr)
         {
-            btRigidBody& body = *held->getRigidBody();
+            btRigidBody& body = *btRigidBody::upcast(held->getCollisionObject());
             const btVector3 offset = holdTarget - body.getCenterOfMassPosition();
             // Stuck behind something, or the carrier moved away too fast: let go.
             constexpr btScalar maxHoldDistance = 200.f;
@@ -1147,7 +1149,9 @@ namespace MWPhysics
                 if (velocity.length2() > maxCarrySpeed * maxCarrySpeed)
                     velocity *= maxCarrySpeed / velocity.length();
                 body.setLinearVelocity(velocity);
-
+            }
+            if (offset.length2() <= maxHoldDistance * maxHoldDistance && steerRotation)
+            {
                 // Likewise turn it towards the target orientation, the short way round.
                 btQuaternion error = holdTargetRotation * body.getOrientation().inverse();
                 if (error.getW() < 0)
@@ -1306,20 +1310,38 @@ namespace MWPhysics
         mFlyingObjectHits.insert(mFlyingObjectHits.end(), hits.begin(), hits.end());
     }
 
-    void PhysicsTaskScheduler::holdObject(const std::shared_ptr<Object>& object)
+    void PhysicsTaskScheduler::holdObject(
+        const std::shared_ptr<PtrHolder>& holder, bool steerRotation, btScalar holdMass)
     {
         releaseHeldObject(std::nullopt);
 
+        btRigidBody* const heldBody = btRigidBody::upcast(holder->getCollisionObject());
+        if (heldBody == nullptr)
+            return;
+        btRigidBody& body = *heldBody;
+        const std::shared_ptr<Object> object = std::dynamic_pointer_cast<Object>(holder);
+
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
         // Grabbing is how stuck things (arrows in a wall) come loose.
-        setStuckUnsafe(*object, false);
-        btRigidBody& body = *object->getRigidBody();
+        if (object != nullptr)
+            setStuckUnsafe(*object, false);
         body.setActivationState(DISABLE_DEACTIVATION);
         body.setGravity(btVector3(0, 0, 0));
-        freeWedgedObjectUnsafe(object);
+        if (object != nullptr)
+            freeWedgedObjectUnsafe(object);
+        mHeldRestoreMass = 0; // left over if the last held thing was destroyed while held
+        if (holdMass > 0 && body.getInvMass() > 0)
+        {
+            mHeldRestoreMass = 1 / body.getInvMass();
+            btVector3 inertia(0, 0, 0);
+            body.getCollisionShape()->calculateLocalInertia(holdMass, inertia);
+            body.setMassProps(holdMass, inertia);
+            body.updateInertiaTensor();
+        }
 
         std::lock_guard heldLock(mHeldObjectMutex);
-        mHeldObject = object;
+        mHeldObject = holder;
+        mHoldSteerRotation = steerRotation;
         mHoldTarget = body.getCenterOfMassPosition();
         mHoldTargetRotation = body.getOrientation();
     }
@@ -1333,12 +1355,13 @@ namespace MWPhysics
 
     void PhysicsTaskScheduler::releaseHeldObject(const std::optional<btVector3>& velocity)
     {
-        const std::shared_ptr<Object> held = getHeldObject();
+        const std::shared_ptr<PtrHolder> held = getHeldObject();
         if (held == nullptr)
             return;
+        if (btRigidBody* body = btRigidBody::upcast(held->getCollisionObject()))
         {
             MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
-            releaseHeldObjectUnsafe(*held->getRigidBody(), velocity);
+            releaseHeldObjectUnsafe(*body, velocity);
         }
         std::lock_guard heldLock(mHeldObjectMutex);
         mHeldObject.reset();
@@ -1346,6 +1369,14 @@ namespace MWPhysics
 
     void PhysicsTaskScheduler::releaseHeldObjectUnsafe(btRigidBody& body, const std::optional<btVector3>& velocity)
     {
+        if (mHeldRestoreMass > 0)
+        {
+            btVector3 inertia(0, 0, 0);
+            body.getCollisionShape()->calculateLocalInertia(mHeldRestoreMass, inertia);
+            body.setMassProps(mHeldRestoreMass, inertia);
+            body.updateInertiaTensor();
+            mHeldRestoreMass = 0;
+        }
         body.forceActivationState(ACTIVE_TAG);
         body.setDeactivationTime(0);
         body.setGravity(mDynamicsWorld->getGravity());
@@ -1454,7 +1485,7 @@ namespace MWPhysics
     void PhysicsTaskScheduler::strikeObjects(const std::vector<Strike>& strikes)
     {
         // The strikes hold the objects, so none can be destroyed while the collision world is locked.
-        const std::shared_ptr<Object> held = getHeldObject();
+        const std::shared_ptr<PtrHolder> held = getHeldObject();
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
         for (const Strike& strike : strikes)
         {
@@ -1492,7 +1523,7 @@ namespace MWPhysics
         }
     }
 
-    std::shared_ptr<Object> PhysicsTaskScheduler::getHeldObject() const
+    std::shared_ptr<PtrHolder> PhysicsTaskScheduler::getHeldObject() const
     {
         std::lock_guard heldLock(mHeldObjectMutex);
         return mHeldObject.lock();

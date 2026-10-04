@@ -788,7 +788,7 @@ namespace MWPhysics
     bool PhysicsSystem::canHoldObject(const MWWorld::ConstPtr& ptr) const
     {
         const Object* object = getObject(ptr);
-        return object != nullptr && object->isDynamic();
+        return (object != nullptr && object->isDynamic()) || hasRagdoll(ptr);
     }
 
     namespace
@@ -800,8 +800,21 @@ namespace MWPhysics
         }
     }
 
-    bool PhysicsSystem::holdObject(const MWWorld::Ptr& ptr, const osg::Vec3f& viewDirection)
+    bool PhysicsSystem::holdObject(const MWWorld::Ptr& ptr, const osg::Vec3f& eye, const osg::Vec3f& viewDirection)
     {
+        if (const auto ragdoll = mRagdolls.find(ptr.mRef); ragdoll != mRagdolls.end())
+        {
+            const std::shared_ptr<PtrHolder> part = ragdoll->second->findPart(eye, viewDirection);
+            if (part == nullptr)
+                return false;
+            mHoldDistance = 70.f;
+            mHoldingRagdoll = true;
+            // Gripped firmly enough to drag the rest of the body along; it hangs as it likes.
+            constexpr btScalar gripMass = 60.f;
+            mTaskScheduler->holdObject(part, false, gripMass);
+            return true;
+        }
+
         const auto found = mObjects.find(ptr.mRef);
         if (found == mObjects.end() || !found->second->isDynamic())
             return false;
@@ -817,14 +830,18 @@ namespace MWPhysics
         // Keep the orientation it has relative to the viewer, so it turns along when the viewer turns.
         mHoldRelativeRotation = viewYaw(viewDirection).inverse() * object->getTransform().getRotation();
 
-        mTaskScheduler->holdObject(object);
+        mHoldingRagdoll = false;
+        mTaskScheduler->holdObject(object, true, 0);
         return true;
     }
 
     void PhysicsSystem::setHoldView(const osg::Vec3f& eye, const osg::Vec3f& direction)
     {
-        mTaskScheduler->setHoldTarget(Misc::Convert::toBullet(eye + direction * mHoldDistance),
-            viewYaw(direction) * mHoldRelativeRotation);
+        osg::Vec3f target = eye + direction * mHoldDistance;
+        // A body is dragged at about waist height, not lifted up to the face.
+        if (mHoldingRagdoll)
+            target.z() = std::min(target.z(), eye.z() - 60.f);
+        mTaskScheduler->setHoldTarget(Misc::Convert::toBullet(target), viewYaw(direction) * mHoldRelativeRotation);
     }
 
     void PhysicsSystem::rotateHeldObject(float yaw, float pitch)
@@ -842,9 +859,13 @@ namespace MWPhysics
             mTaskScheduler->releaseHeldObject(std::nullopt);
             return;
         }
-        const std::shared_ptr<Object> held = mTaskScheduler->getHeldObject();
+        // Bodies are only dragged, not thrown.
+        const std::shared_ptr<Object> held = std::dynamic_pointer_cast<Object>(mTaskScheduler->getHeldObject());
         if (held == nullptr)
+        {
+            mTaskScheduler->releaseHeldObject(std::nullopt);
             return;
+        }
         // Light things fly fast, heavy things barely leave the hand.
         const float mass = static_cast<float>(1.0 / held->getRigidBody()->getInvMass());
         const float speed = std::clamp(1200.f * std::sqrt(2.f / mass), 250.f, 1200.f);
