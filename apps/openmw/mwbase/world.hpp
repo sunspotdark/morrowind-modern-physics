@@ -312,8 +312,11 @@ namespace MWBase
             const MWWorld::ConstPtr& actor) const
             = 0;
         /// Make a dead actor's body a ragdoll: limp if it has a skeleton, else (if allowOnePiece) in one piece, its
-        /// model following. kick is how the killing blow throws it. @return false if it can't be made.
-        virtual bool makeRagdoll(const MWWorld::Ptr& actor, const osg::Vec3f& kick, bool allowOnePiece) = 0;
+        /// model following. kick is how the killing blow throws it; atRest makes it start out still (as it was left
+        /// lying). @return false if it can't be made.
+        virtual bool makeRagdoll(
+            const MWWorld::Ptr& actor, const osg::Vec3f& kick, bool allowOnePiece, bool atRest)
+            = 0;
         virtual void removeRagdoll(const MWWorld::ConstPtr& actor) = 0;
 
         /// A simulated object fell into water here, going down at speed: ripples, and a splash if fast.

@@ -836,6 +836,15 @@ namespace MWPhysics
         mDynamicsWorld->removeAction(action);
     }
 
+    void PhysicsTaskScheduler::setAtRest(btRigidBody* body)
+    {
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        body->setLinearVelocity(btVector3(0, 0, 0));
+        body->setAngularVelocity(btVector3(0, 0, 0));
+        body->clearForces();
+        body->forceActivationState(ISLAND_SLEEPING);
+    }
+
     void PhysicsTaskScheduler::removeCollisionObject(btCollisionObject* collisionObject)
     {
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);

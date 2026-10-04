@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <type_traits>
 
+#include <osg/Quat>
+
 #include <components/esm3/actoridconverter.hpp>
 #include <components/esm3/creaturestats.hpp>
 #include <components/esm3/esmreader.hpp>
@@ -540,6 +542,19 @@ namespace MWMechanics
         state.mLevel = mLevel;
         state.mDeathAnimation = mDeathAnimation;
         state.mTimeOfDeath = mTimeOfDeath.toEsm();
+        state.mRagdoll.clear();
+        for (const auto& [bone, matrix] : mRagdollPose)
+        {
+            osg::Vec3f position;
+            osg::Quat rotation;
+            osg::Vec3f scale;
+            osg::Quat scaleOrientation;
+            matrix.decompose(position, rotation, scale, scaleOrientation);
+            state.mRagdoll.push_back({ bone,
+                { position.x(), position.y(), position.z(), static_cast<float>(rotation.x()),
+                    static_cast<float>(rotation.y()), static_cast<float>(rotation.z()),
+                    static_cast<float>(rotation.w()), scale.x() } });
+        }
         // state.mHitAttemptActorId = mHitAttemptActorId;
 
         mSpells.writeState(state.mSpells);
@@ -592,6 +607,14 @@ namespace MWMechanics
         mLevel = state.mLevel;
         mDeathAnimation = state.mDeathAnimation;
         mTimeOfDeath = MWWorld::TimeStamp(state.mTimeOfDeath);
+        mRagdollPose.clear();
+        for (const ESM::CreatureStats::RagdollBone& bone : state.mRagdoll)
+        {
+            const auto& p = bone.mPose;
+            mRagdollPose.emplace_back(bone.mName,
+                osg::Matrixf::scale(p[7], p[7], p[7]) * osg::Matrixf::rotate(osg::Quat(p[3], p[4], p[5], p[6]))
+                    * osg::Matrixf::translate(p[0], p[1], p[2]));
+        }
         // mHitAttemptActor = state.mHitAttemptActor;
 
         mSpells.readState(state.mSpells, this);

@@ -79,6 +79,8 @@ namespace MWPhysics
         /// Something run every simulation step (inside it, with the world locked).
         void addAction(btActionInterface* action);
         void removeAction(btActionInterface* action);
+        /// Stop a body and put it to sleep.
+        void setAtRest(btRigidBody* body);
 
         // Carrying a dynamic object: each physics step it is steered towards the hold target.
         /// steerRotation: also turn it to the target orientation. holdMass: if set, its mass while held (a heavier

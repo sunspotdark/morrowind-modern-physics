@@ -195,6 +195,15 @@ namespace ESM
             mMissingACDT = false;
             esm.getHNOT(mMissingACDT, "NOAC");
         }
+
+        mRagdoll.clear();
+        while (esm.isNextSub("RAGB"))
+        {
+            RagdollBone bone;
+            bone.mName = esm.getHString();
+            esm.getHNT(bone.mPose, "RAGP");
+            mRagdoll.push_back(std::move(bone));
+        }
     }
 
     void CreatureStats::save(ESMWriter& esm) const
@@ -303,6 +312,12 @@ namespace ESM
         }
         if (mMissingACDT)
             esm.writeHNT("NOAC", mMissingACDT);
+
+        for (const RagdollBone& bone : mRagdoll)
+        {
+            esm.writeHNString("RAGB", bone.mName);
+            esm.writeHNT("RAGP", bone.mPose);
+        }
     }
 
     void CreatureStats::blank()
@@ -328,6 +343,7 @@ namespace ESM
         mFallHeight = 0.f;
         mRecalcDynamicStats = false;
         mDrawState = 0;
+        mRagdoll.clear();
         mDeathAnimation = -1;
         mLevel = 1;
         mCorprusSpells.clear();

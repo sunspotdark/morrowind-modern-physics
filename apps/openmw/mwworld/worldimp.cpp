@@ -1401,7 +1401,8 @@ namespace MWWorld
             return false;
         // Bodies only go limp as they die, so one from before a save (or placed dead) lies in its death pose
         // until picked up.
-        if (canRagdollCorpse(ptr) && getRagdollBonePoses(ptr).empty() && !makeRagdoll(ptr, osg::Vec3f(), true))
+        if (canRagdollCorpse(ptr) && getRagdollBonePoses(ptr).empty()
+            && !makeRagdoll(ptr, osg::Vec3f(), true, false))
             return false;
         const MWRender::Camera* camera = mRendering->getCamera();
         return mPhysics->holdObject(ptr, camera->getPosition(), camera->getOrient() * osg::Vec3f(0, 1, 0));
@@ -1428,7 +1429,16 @@ namespace MWWorld
         return mPhysics->getRagdollBonePoses(actor);
     }
 
-    bool World::makeRagdoll(const MWWorld::Ptr& actor, const osg::Vec3f& kick, bool allowOnePiece)
+    bool World::makeRagdoll(const MWWorld::Ptr& actor, const osg::Vec3f& kick, bool allowOnePiece, bool atRest)
+    {
+        if (!makeRagdollBody(actor, kick, allowOnePiece))
+            return false;
+        if (atRest)
+            mPhysics->settleRagdoll(actor);
+        return true;
+    }
+
+    bool World::makeRagdollBody(const MWWorld::Ptr& actor, const osg::Vec3f& kick, bool allowOnePiece)
     {
         const MWRender::Animation* animation = mRendering->getAnimation(actor);
         if (animation == nullptr)

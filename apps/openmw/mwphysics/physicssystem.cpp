@@ -715,6 +715,12 @@ namespace MWPhysics
         return true;
     }
 
+    void PhysicsSystem::settleRagdoll(const MWWorld::ConstPtr& actor)
+    {
+        if (const auto found = mRagdolls.find(actor.mRef); found != mRagdolls.end())
+            found->second->setAtRest();
+    }
+
     std::vector<std::pair<std::string, osg::Matrixf>> PhysicsSystem::getLastRagdollBonePoses(
         const MWWorld::ConstPtr& actor) const
     {

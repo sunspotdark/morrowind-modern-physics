@@ -89,6 +89,15 @@ namespace ESM
         int32_t mLevel;
         bool mMissingACDT;
 
+        /// A bone of a dead body's ragdoll: where it lies in the world (position, rotation as a quaternion x y z w,
+        /// scale).
+        struct RagdollBone
+        {
+            std::string mName;
+            std::array<float, 8> mPose;
+        };
+        std::vector<RagdollBone> mRagdoll;
+
         std::map<ESM::RefId, CorprusStats> mCorprusSpells;
         SpellState mSpells;
         ActiveSpells mActiveSpells;

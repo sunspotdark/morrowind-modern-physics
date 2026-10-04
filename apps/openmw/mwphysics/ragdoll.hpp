@@ -90,6 +90,9 @@ namespace MWPhysics
 
         float getMass() const;
 
+        /// Still and asleep, as if it had been lying there (until something disturbs it).
+        void setAtRest();
+
         /// The part closest to a view ray from eye along direction (normalized), for grabbing.
         std::shared_ptr<PtrHolder> findPart(const osg::Vec3f& eye, const osg::Vec3f& direction) const;
 

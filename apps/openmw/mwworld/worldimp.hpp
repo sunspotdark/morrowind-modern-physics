@@ -387,6 +387,7 @@ namespace MWWorld
         bool canGrabObject(const MWWorld::ConstPtr& ptr) const override;
         /// A dead actor whose body can be made a ragdoll (see grabObject).
         bool canRagdollCorpse(const MWWorld::ConstPtr& ptr) const;
+        bool makeRagdollBody(const MWWorld::Ptr& actor, const osg::Vec3f& kick, bool allowOnePiece);
         bool grabObject(const MWWorld::Ptr& ptr) override;
         void releaseGrabbedObject(bool throwObject) override;
         bool isGrabbingObject() const override;
@@ -396,7 +397,8 @@ namespace MWWorld
         void objectEnteredWater(const osg::Vec3f& position, float speed) override;
         std::vector<std::pair<std::string, osg::Matrixf>> getRagdollBonePoses(
             const MWWorld::ConstPtr& actor) const override;
-        bool makeRagdoll(const MWWorld::Ptr& actor, const osg::Vec3f& kick, bool allowOnePiece) override;
+        bool makeRagdoll(
+            const MWWorld::Ptr& actor, const osg::Vec3f& kick, bool allowOnePiece, bool atRest) override;
         void removeRagdoll(const MWWorld::ConstPtr& actor) override;
         void knockObjectsWithMeleeAttack(const MWWorld::Ptr& attacker, const MWWorld::Ptr& weapon, int attackType,
             float attackStrength) override;

@@ -503,6 +503,12 @@ namespace MWPhysics
         return osg::Vec3f(main.x() + mActorOffset->x(), main.y() + mActorOffset->y(), main.z());
     }
 
+    void Ragdoll::setAtRest()
+    {
+        for (const auto& part : mParts)
+            mTaskScheduler->setAtRest(part->mBody);
+    }
+
     float Ragdoll::getMass() const
     {
         float mass = 0;

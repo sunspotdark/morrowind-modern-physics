@@ -2456,6 +2456,12 @@ namespace MWMechanics
         }
         else if (cls.getCreatureStats(mPtr).isDead())
         {
+            // A body that was a ragdoll lies as it was left (after loading, or coming back to its cell).
+            if (!mRagdoll && !mRagdollRestored && mAnimation != nullptr)
+            {
+                mRagdollRestored = true;
+                restoreRagdoll();
+            }
             if (mRagdoll || mAnimation != nullptr)
                 driveRagdoll();
 
@@ -2857,6 +2863,7 @@ namespace MWMechanics
             MWBase::Environment::get().getWorld()->removeRagdoll(mPtr);
             mRagdoll = false;
         }
+        mPtr.getClass().getCreatureStats(mPtr).setRagdollPose({});
 
         if (mDeathState == CharState_None)
             return;
@@ -2873,7 +2880,7 @@ namespace MWMechanics
         CreatureStats& stats = mPtr.getClass().getCreatureStats(mPtr);
         const osg::Vec3f kick = stats.getDeathKick();
         stats.setDeathKick(osg::Vec3f());
-        if (!MWBase::Environment::get().getWorld()->makeRagdoll(mPtr, kick, false))
+        if (!MWBase::Environment::get().getWorld()->makeRagdoll(mPtr, kick, false, false))
             return false;
         mRagdoll = true;
         return true;
@@ -2900,6 +2907,49 @@ namespace MWMechanics
         for (const auto& [bone, world] : poses)
             if (!bone.empty())
                 mAnimation->setBoneWorldMatrix(bone, world);
+
+        // Remembered (and saved) where it lies. (Not relative to the actor: a corpse settles onto the ground when
+        // it is loaded, which would bury the body.)
+        std::vector<std::pair<std::string, osg::Matrixf>> pose(poses.begin(), poses.end());
+        mPtr.getClass().getCreatureStats(mPtr).setRagdollPose(std::move(pose));
+    }
+
+    void CharacterController::restoreRagdoll()
+    {
+        const std::vector<std::pair<std::string, osg::Matrixf>>& pose
+            = mPtr.getClass().getCreatureStats(mPtr).getRagdollPose();
+        if (pose.empty() || mPtr == getPlayer())
+            return;
+        // Moved away since (by a script, say): it lies as it died there.
+        constexpr float maxDistance = 256.f;
+        if ((pose.front().second.getTrans() - mPtr.getRefData().getPosition().asVec3()).length2()
+            > maxDistance * maxDistance)
+            return;
+
+        // Pose the body as it lay, then make the ragdoll from that pose, at rest.
+        mAnimation->stopAllAnimations();
+        for (const auto& [bone, world] : pose)
+        {
+            if (!bone.empty())
+                mAnimation->setBoneWorldMatrix(bone, world);
+            else if (SceneUtil::PositionAttitudeTransform* base = mPtr.getRefData().getBaseNode())
+            {
+                // In one piece: the whole model.
+                osg::Vec3f translation;
+                osg::Quat rotation;
+                osg::Vec3f scale;
+                osg::Quat scaleOrientation;
+                world.decompose(translation, rotation, scale, scaleOrientation);
+                base->setPosition(translation);
+                base->setAttitude(rotation);
+            }
+        }
+        if (!MWBase::Environment::get().getWorld()->makeRagdoll(mPtr, osg::Vec3f(), true, true))
+            return; // It plays its death animation after all.
+        mRagdoll = true;
+        // Not the death animation, which it already played.
+        if (mDeathState != CharState_None)
+            mCurrentDeath = deathStateToAnimGroup(mDeathState);
     }
 
     void CharacterController::updateContinuousVfx() const
