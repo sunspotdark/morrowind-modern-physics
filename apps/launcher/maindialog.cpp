@@ -5,6 +5,7 @@
 #include <QMessageBox>
 #include <QStringList>
 #include <QTime>
+#include <QVBoxLayout>
 
 #include <components/debug/debugging.hpp>
 #include <components/debug/debuglog.hpp>
@@ -25,6 +26,8 @@
 namespace
 {
     constexpr const char* toolBarStyle = "QToolBar { border: 0px; } QToolButton { min-width: 70px }";
+    // Version of the physics fork (matches the release tag), separate from OpenMW's own version
+    constexpr const char* forkVersion = "1.0";
 }
 
 using namespace Process;
@@ -77,9 +80,24 @@ Launcher::MainDialog::MainDialog(const Files::ConfigurationManager& configuratio
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     toolBar->addWidget(spacer);
 
-    QLabel* logo = new QLabel(this);
+    // Logo with the fork's name underneath, so it isn't mistaken for official OpenMW
+    QWidget* branding = new QWidget(this);
+    QVBoxLayout* brandingLayout = new QVBoxLayout(branding);
+    brandingLayout->setContentsMargins(0, 0, 0, 0);
+    brandingLayout->setSpacing(0);
+
+    QLabel* logo = new QLabel(branding);
     logo->setPixmap(QIcon(":/images/openmw-header.png").pixmap(QSize(294, 64)));
-    toolBar->addWidget(logo);
+    brandingLayout->addWidget(logo);
+
+    QLabel* forkLabel = new QLabel(tr("Modern Physics Fork v%1 (Unofficial) by sunspotdark").arg(forkVersion), branding);
+    forkLabel->setAlignment(Qt::AlignRight);
+    QFont forkFont = forkLabel->font();
+    forkFont.setItalic(true);
+    forkLabel->setFont(forkFont);
+    brandingLayout->addWidget(forkLabel);
+
+    toolBar->addWidget(branding);
     toolBar->setStyleSheet(toolBarStyle);
 }
 
