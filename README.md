@@ -3,7 +3,7 @@ OpenMW - Modern Physics Fork (Unofficial)
 
 Hi, sunspotdark here. Below the line is a detailed AI generated summary of the actual changes and such, but I felt compelled to add a personal note here at the top written with my actual human hands. 
 
-This is an unofficial fork of the OpenMW engine that adds Oblivion/Skyrim style physics to Morrowind. You can pick up items, spin them around and throw them. Or tenderly place them on a table or whatever You do you. All enemies and NPCs have ragdoll physics and you can drag the bodies around. Stuff floats in the water. Arrows stick in the environment. Etc. Etc. Etc. 
+This is an unofficial fork of the OpenMW engine that adds Oblivion/Skyrim style physics to Morrowind. You can pick up items, spin them around and throw them. Or tenderly place them on a table or whatever. You do you. All enemies and NPCs have ragdoll physics and you can drag the bodies around. Stuff floats in the water. Arrows stick in the environment. Etc. Etc. Etc. 
 
 I am not a programmer. At all. This MF is vibecoded to hell and back, specifically with Claude Opus 5.5. Frankly, I didn't think this was even going to work when I started poking at it, but guess that shows what I know. Chances are, there's a lot of broken stuff if you get deeper into the game, but everything around Seyda Neen seems to be working as intended so I figured why not share it. I may update this from time to time based on feedback or my own personal playthrough, but currently it seems to work well enough to toss out into the world.
 
