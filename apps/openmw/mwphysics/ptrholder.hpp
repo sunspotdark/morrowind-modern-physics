@@ -32,6 +32,9 @@ namespace MWPhysics
 
         btCollisionObject* getCollisionObject() const { return mCollisionObject.get(); }
 
+        /// How dense it is relative to water, for floating (a simulated body; others don't float).
+        virtual float getRelativeDensity() const { return 1.05f; }
+
         void setVelocity(osg::Vec3f velocity) { mVelocity = velocity; }
 
         osg::Vec3f velocity() { return std::exchange(mVelocity, osg::Vec3f()); }

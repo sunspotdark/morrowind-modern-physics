@@ -1260,9 +1260,9 @@ namespace MWPhysics
             // each by how deep it is, so the deeper side gets pushed up harder and the object turns into a
             // natural floating position (a bottle on its side, a book flat) instead of keeping whatever angle it
             // landed at.
-            // Items know how dense they are; anything else (a body) is about as dense as water.
-            const auto* object = dynamic_cast<const Object*>(static_cast<const PtrHolder*>(body->getUserPointer()));
-            const float relativeDensity = object != nullptr ? object->getRelativeDensity() : 1.05f;
+            // Items know how dense they are, and so do the parts of a body.
+            const auto* holder = static_cast<const PtrHolder*>(body->getUserPointer());
+            const float relativeDensity = holder != nullptr ? holder->getRelativeDensity() : 1.05f;
             const btScalar mass = 1 / body->getInvMass();
             btVector3 localMin;
             btVector3 localMax;

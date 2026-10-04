@@ -46,7 +46,7 @@ namespace MWPhysics
             PhysicsTaskScheduler* scheduler);
 
         /// For dynamic objects: density relative to water (below 1 floats).
-        float getRelativeDensity() const { return mRelativeDensity; }
+        float getRelativeDensity() const override { return mRelativeDensity; }
         ~Object() override;
 
         bool isDynamic() const { return mRigidBody != nullptr; }

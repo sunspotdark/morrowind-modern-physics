@@ -112,6 +112,9 @@ namespace MWPhysics
         btTransform mBoneFromBody; // the bone's transform in the body's frame (without scale)
         osg::Vec3f mBoneScale;
         osg::Vec3f mBoxHalfExtents; // for a single box body
+        float mRelativeDensity = 1.05f; // to water: a creature's body sinks slowly (people's: see sPartDefs)
+
+        float getRelativeDensity() const override { return mRelativeDensity; }
     };
 
     namespace
@@ -127,22 +130,25 @@ namespace MWPhysics
             float mSwing1;
             float mSwing2;
             float mTwist;
+            // Relative to water: the chest floats high (the lungs), the rest only just, so a body floats face
+            // down, near the surface, its head and limbs drooping a little.
+            float mDensity;
         };
 
         // A human-sized body (about 128 units tall). Knees and elbows swing mostly one way, so one swing span
         // is kept small; shoulders and hips are loose.
         constexpr PartDef sPartDefs[] = {
-            { "Bip01 Pelvis", "Bip01 Spine1", 11.f, 12.f, -1, 0, 0, 0 },
-            { "Bip01 Spine1", "Bip01 Neck", 12.f, 15.f, 0, 25, 25, 15 },
-            { "Bip01 Head", "", 8.f, 5.f, 1, 40, 40, 40 },
-            { "Bip01 L UpperArm", "Bip01 L Forearm", 4.5f, 3.f, 1, 80, 80, 40 },
-            { "Bip01 L Forearm", "Bip01 L Hand", 4.f, 2.f, 3, 70, 10, 20 },
-            { "Bip01 R UpperArm", "Bip01 R Forearm", 4.5f, 3.f, 1, 80, 80, 40 },
-            { "Bip01 R Forearm", "Bip01 R Hand", 4.f, 2.f, 5, 70, 10, 20 },
-            { "Bip01 L Thigh", "Bip01 L Calf", 6.5f, 7.f, 0, 60, 40, 15 },
-            { "Bip01 L Calf", "Bip01 L Foot", 5.f, 4.f, 7, 70, 10, 10 },
-            { "Bip01 R Thigh", "Bip01 R Calf", 6.5f, 7.f, 0, 60, 40, 15 },
-            { "Bip01 R Calf", "Bip01 R Foot", 5.f, 4.f, 9, 70, 10, 10 },
+            { "Bip01 Pelvis", "Bip01 Spine1", 11.f, 12.f, -1, 0, 0, 0, 0.8f },
+            { "Bip01 Spine1", "Bip01 Neck", 12.f, 15.f, 0, 25, 25, 15, 0.65f },
+            { "Bip01 Head", "", 8.f, 5.f, 1, 40, 40, 40, 0.95f },
+            { "Bip01 L UpperArm", "Bip01 L Forearm", 4.5f, 3.f, 1, 80, 80, 40, 0.98f },
+            { "Bip01 L Forearm", "Bip01 L Hand", 4.f, 2.f, 3, 70, 10, 20, 0.98f },
+            { "Bip01 R UpperArm", "Bip01 R Forearm", 4.5f, 3.f, 1, 80, 80, 40, 0.98f },
+            { "Bip01 R Forearm", "Bip01 R Hand", 4.f, 2.f, 5, 70, 10, 20, 0.98f },
+            { "Bip01 L Thigh", "Bip01 L Calf", 6.5f, 7.f, 0, 60, 40, 15, 0.98f },
+            { "Bip01 L Calf", "Bip01 L Foot", 5.f, 4.f, 7, 70, 10, 10, 0.98f },
+            { "Bip01 R Thigh", "Bip01 R Calf", 6.5f, 7.f, 0, 60, 40, 15, 0.98f },
+            { "Bip01 R Calf", "Bip01 R Foot", 5.f, 4.f, 9, 70, 10, 10, 0.98f },
         };
 
         btTransform withoutScale(const osg::Matrixf& matrix, osg::Vec3f& scale)
@@ -199,6 +205,7 @@ namespace MWPhysics
             part->mBoneFromBody
                 = bodyWorld.inverse() * withoutScale(bones.find(def.mBone)->second, part->mBoneScale);
 
+            part->mRelativeDensity = def.mDensity;
             makeBody(*part, bodyWorld, def.mMass, def.mRadius);
 
             // Falling as it was moving, the upper body thrown back by the killing blow.
