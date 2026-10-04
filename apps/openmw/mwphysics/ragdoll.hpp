@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <osg/Matrixf>
+#include <osg/Vec2f>
 #include <osg/Vec3f>
 
 #include <LinearMath/btTransform.h>
@@ -98,6 +99,11 @@ namespace MWPhysics
         /// What getBonePoses gave last (so the rest of the frame agrees with what the bones were set to).
         const std::vector<std::pair<std::string, osg::Matrixf>>& getLastBonePoses() const { return mLastPoses; }
 
+        /// Where the actor (whose position is at its feet, actorPosition now) should be for its body to be where
+        /// the ragdoll is: following the main part (the pelvis, say) along the ground, at its height. Empty
+        /// before the bones were first posed.
+        std::optional<osg::Vec3f> getActorPosition(const osg::Vec3f& actorPosition);
+
     private:
         struct Part;
 
@@ -110,6 +116,7 @@ namespace MWPhysics
 
         mutable std::vector<std::pair<std::string, osg::Matrixf>> mLastPoses;
         std::unique_ptr<btActionInterface> mJointFriction;
+        std::optional<osg::Vec2f> mActorOffset; // from the main part to the actor, along the ground
 
         PhysicsTaskScheduler* mTaskScheduler;
         std::vector<std::shared_ptr<Part>> mParts; // shared: a part can be held (see PhysicsTaskScheduler)

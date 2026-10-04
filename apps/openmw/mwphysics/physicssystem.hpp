@@ -202,6 +202,8 @@ namespace MWPhysics
             const osg::Vec3f& kick);
         /// The simulated bones of the actor's ragdoll (world matrices, parents first); empty without one.
         std::vector<std::pair<std::string, osg::Matrixf>> getRagdollBonePoses(const MWWorld::ConstPtr& actor) const;
+        /// What getRagdollBonePoses gave last.
+        std::vector<std::pair<std::string, osg::Matrixf>> getLastRagdollBonePoses(const MWWorld::ConstPtr& actor) const;
         /// For any skinned body (see Ragdoll::fromSkeleton). @return false if it can't be made.
         bool createSkinnedRagdoll(
             const MWWorld::Ptr& actor, const std::vector<Ragdoll::SkinnedBone>& bones, const osg::Vec3f& kick);
@@ -291,7 +293,8 @@ namespace MWPhysics
             float dt, bool skipSimulation, osg::Timer_t frameStart, unsigned int frameNumber, osg::Stats& stats);
 
         /// Apply new positions to actors and simulated objects
-        void moveActors();
+        /// @return the dead actors moved along with their bodies (ragdolls)
+        std::vector<MWWorld::Ptr> moveActors();
         void debugDraw();
 
         std::vector<MWWorld::Ptr> getCollisions(const MWWorld::ConstPtr& ptr, int collisionGroup,

@@ -1615,7 +1615,16 @@ namespace MWWorld
         mPhysics->stepSimulation(duration, mDiscardMovements, frameStart, frameNumber, stats);
         mProjectileManager->processHits();
         mDiscardMovements = false;
-        mPhysics->moveActors();
+        for (const MWWorld::Ptr& body : mPhysics->moveActors())
+        {
+            // Its bones were set in the world before it moved; put them back there (or they'd move with it).
+            MWRender::Animation* animation = mRendering->getAnimation(body);
+            if (animation == nullptr)
+                continue;
+            for (const auto& [bone, world] : mPhysics->getLastRagdollBonePoses(body))
+                if (!bone.empty())
+                    animation->setBoneWorldMatrix(bone, world);
+        }
 
         // Hitting someone with a thrown object is an attack, like any other.
         for (const MWPhysics::ThrownObjectHit& hit : mPhysics->takeThrownObjectHits())

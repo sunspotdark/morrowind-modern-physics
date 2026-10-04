@@ -492,6 +492,17 @@ namespace MWPhysics
         mTaskScheduler->addAction(mJointFriction.get());
     }
 
+    std::optional<osg::Vec3f> Ragdoll::getActorPosition(const osg::Vec3f& actorPosition)
+    {
+        if (mLastPoses.empty())
+            return std::nullopt;
+        const osg::Vec3f main = mLastPoses.front().second.getTrans();
+        // Kept from the start: a body picked up lying down lies off to one side of where the actor stands.
+        if (!mActorOffset)
+            mActorOffset = osg::Vec2f(actorPosition.x() - main.x(), actorPosition.y() - main.y());
+        return osg::Vec3f(main.x() + mActorOffset->x(), main.y() + mActorOffset->y(), main.z());
+    }
+
     float Ragdoll::getMass() const
     {
         float mass = 0;

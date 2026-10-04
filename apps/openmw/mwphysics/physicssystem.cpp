@@ -715,6 +715,15 @@ namespace MWPhysics
         return true;
     }
 
+    std::vector<std::pair<std::string, osg::Matrixf>> PhysicsSystem::getLastRagdollBonePoses(
+        const MWWorld::ConstPtr& actor) const
+    {
+        const auto found = mRagdolls.find(actor.mRef);
+        if (found == mRagdolls.end())
+            return {};
+        return found->second->getLastBonePoses();
+    }
+
     bool PhysicsSystem::createRigidPieceRagdoll(
         const MWWorld::Ptr& actor, const std::vector<Ragdoll::RigidPiece>& pieces, const osg::Vec3f& kick)
     {
@@ -1386,7 +1395,7 @@ namespace MWPhysics
         }
     }
 
-    void PhysicsSystem::moveActors()
+    std::vector<MWWorld::Ptr> PhysicsSystem::moveActors()
     {
         auto* player = getActor(MWMechanics::getPlayer());
         const auto world = MWBase::Environment::get().getWorld();
@@ -1403,20 +1412,28 @@ namespace MWPhysics
                 continue;
             if (const auto ragdoll = mRagdolls.find(ptr); ragdoll != mRagdolls.end())
             {
-                // A body in one piece carries the actor along (so it is there after loading, too); a limp one
-                // leaves it where it died, only its bones move.
+                // The body carries the actor along, so it is where the body is (for its cell, and after loading).
                 // As its model was posed this frame (see getRagdollBonePoses).
                 const auto& poses = ragdoll->second->getLastBonePoses();
+                const MWWorld::Ptr actorPtr = physicActor->getPtr();
                 if (poses.size() == 1 && poses.front().first.empty())
                 {
+                    // In one piece: the whole model is the body.
                     osg::Vec3f translation;
                     osg::Quat rotation;
                     osg::Vec3f scale;
                     osg::Quat scaleOrientation;
                     poses.front().second.decompose(translation, rotation, scale, scaleOrientation);
-                    if (SceneUtil::PositionAttitudeTransform* base = physicActor->getPtr().getRefData().getBaseNode())
+                    if (SceneUtil::PositionAttitudeTransform* base = actorPtr.getRefData().getBaseNode())
                         base->setAttitude(rotation);
-                    bodyPositions.emplace_back(physicActor->getPtr(), translation);
+                    bodyPositions.emplace_back(actorPtr, translation);
+                }
+                else if (const std::optional<osg::Vec3f> position
+                         = ragdoll->second->getActorPosition(actorPtr.getRefData().getPosition().asVec3());
+                         position && (*position - actorPtr.getRefData().getPosition().asVec3()).length2() > 1.f)
+                {
+                    // Limp, or in pieces: the actor follows the main part; its bones are set where they are.
+                    bodyPositions.emplace_back(actorPtr, *position);
                 }
                 continue;
             }
@@ -1425,13 +1442,15 @@ namespace MWPhysics
 
         for (const auto& [ptr, pos] : mActorsPositions)
             world->moveObject(ptr, pos, false, false);
+        std::vector<MWWorld::Ptr> moved;
         for (const auto& [ptr, pos] : bodyPositions)
-            world->moveObject(ptr, pos, true, false);
+            moved.push_back(world->moveObject(ptr, pos, true, false));
 
         if (player != nullptr)
             world->moveObject(player->getPtr(), player->getSimulationPosition(), false, false);
 
         moveDynamicObjects();
+        return moved;
     }
 
     void PhysicsSystem::moveDynamicObjects()
