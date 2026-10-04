@@ -218,6 +218,15 @@ namespace MWPhysics
         /// from source. Returns whether it was.
         bool strikeObject(const MWWorld::Ptr& ptr, const osg::Vec3f& velocityChange, const osg::Vec3f& point,
             const osg::Vec3f& source);
+        struct DynamicObjectInfo
+        {
+            MWWorld::Ptr mPtr;
+            osg::Vec3f mCenter; // center of mass
+            float mRadius; // of a sphere around the simulated shape
+        };
+        /// Simulated objects whose center of mass is within radius of center, nearest first.
+        std::vector<DynamicObjectInfo> getDynamicObjectsInRange(const osg::Vec3f& center, float radius) const;
+
         /// Push simulated objects away from center, up to speed at the center and nothing at radius.
         void explode(const osg::Vec3f& center, float radius, float speed);
 

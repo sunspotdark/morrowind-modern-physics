@@ -244,11 +244,7 @@ namespace MWClass
         const float dist = MWMechanics::getMeleeWeaponReach(ptr, weapon);
         const std::pair<MWWorld::Ptr, osg::Vec3f> result = MWMechanics::getHitContact(ptr, dist);
         if (result.first.isEmpty()) // Didn't hit anything
-        {
-            // Nobody in reach, but maybe a loose object to knock over.
-            MWBase::Environment::get().getWorld()->knockObjectInMeleeReach(ptr, dist);
             return true;
-        }
 
         // Note that earlier we returned true in spite of an apparent failure to hit anything alive.
         // This is because hitting nothing is not a "miss" and should be handled as such character controller-side.
@@ -278,8 +274,11 @@ namespace MWClass
 
         MWMechanics::applyFatigueLoss(ptr, weapon, attackStrength);
 
-        if (victim.isEmpty())
-            return; // Didn't hit anything
+        if (victim.isEmpty()) // Didn't hit anyone; but maybe loose objects in the way of the swing
+        {
+            MWBase::Environment::get().getWorld()->knockObjectsWithMeleeAttack(ptr, weapon, type, attackStrength);
+            return;
+        }
 
         const MWWorld::Class& othercls = victim.getClass();
         MWMechanics::CreatureStats& otherstats = othercls.getCreatureStats(victim);

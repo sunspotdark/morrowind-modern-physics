@@ -847,6 +847,26 @@ namespace MWPhysics
         return true;
     }
 
+    std::vector<PhysicsSystem::DynamicObjectInfo> PhysicsSystem::getDynamicObjectsInRange(
+        const osg::Vec3f& center, float radius) const
+    {
+        std::vector<DynamicObjectInfo> result;
+        for (const std::shared_ptr<Object>& object : mDynamicObjects)
+        {
+            const osg::Vec3f position = Misc::Convert::toOsg(object->getCenterOfMassTransform().getOrigin());
+            if ((position - center).length2() > radius * radius)
+                continue;
+            btVector3 aabbMin;
+            btVector3 aabbMax;
+            object->getDynamicShape()->getAabb(btTransform::getIdentity(), aabbMin, aabbMax);
+            result.push_back({ object->getPtr(), position, static_cast<float>((aabbMax - aabbMin).length() * 0.5) });
+        }
+        std::sort(result.begin(), result.end(), [&](const DynamicObjectInfo& a, const DynamicObjectInfo& b) {
+            return (a.mCenter - center).length2() < (b.mCenter - center).length2();
+        });
+        return result;
+    }
+
     void PhysicsSystem::explode(const osg::Vec3f& center, float radius, float speed)
     {
         if (radius <= 0)

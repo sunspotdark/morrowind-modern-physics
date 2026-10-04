@@ -1420,28 +1420,120 @@ namespace MWWorld
         mPhysics->explode(center, radius, 600.f);
     }
 
-    void World::knockObjectInMeleeReach(const MWWorld::Ptr& attacker, float reach)
+    void World::knockObjectsWithMeleeAttack(
+        const MWWorld::Ptr& attacker, const MWWorld::Ptr& weapon, int attackType, float attackStrength)
     {
-        // Swing along the view for the player, along the facing direction for everyone else.
+        // Everything loose that the swing passes through: within weapon reach of the attacker's body, inside the
+        // same arc as hitting actors, from the floor to over the head, and not behind a wall.
+        const float reach = MWMechanics::getMeleeWeaponReach(attacker, weapon);
         const ESM::Position& position = attacker.getRefData().getPosition();
-        const osg::Vec3f eye
-            = position.asVec3() + osg::Vec3f(0, 0, mPhysics->getHalfExtents(attacker).z() * 2.f * 0.85f);
-        osg::Vec3f direction = attacker == getPlayerPtr()
-            ? mRendering->getCamera()->getOrient() * osg::Vec3f(0, 1, 0)
-            : osg::Quat(position.rot[2], osg::Vec3f(0, 0, -1)) * osg::Vec3f(0, 1, 0);
-        direction.normalize();
+        const osg::Vec3f feet = position.asVec3();
+        const osg::Vec3f halfExtents = mPhysics->getHalfExtents(attacker);
+        const osg::Vec3f eye = feet + osg::Vec3f(0, 0, halfExtents.z() * 2.f * 0.85f);
 
-        // The first thing in the way, so items behind walls (or behind furniture) are safe.
-        const MWPhysics::RayCastingResult hit = mPhysics->castSphere(eye, eye + direction * reach, 10.f,
-            MWPhysics::CollisionType_DynamicSupport | MWPhysics::CollisionType_Dynamic,
-            MWPhysics::CollisionType_Dynamic);
-        if (!hit.mHit || hit.mHitObject.isEmpty() || !hit.mHitObject.getClass().isItem(hit.mHitObject))
+        // Which way the attacker faces (the view, for the player).
+        const bool isPlayer = attacker == getPlayerPtr();
+        const osg::Vec3f view = isPlayer ? mRendering->getCamera()->getOrient() * osg::Vec3f(0, 1, 0)
+                                         : osg::Quat(position.rot[2], osg::Vec3f(0, 0, -1)) * osg::Vec3f(0, 1, 0);
+        // The player swings where they look, up or down; others at anything from their feet to over their head.
+        const float viewElevation = std::asin(std::clamp(view.z() / view.length(), -1.f, 1.f));
+        const float maxElevationOffAim = osg::DegreesToRadians(25.f);
+        osg::Vec3f forward = view;
+        forward.z() = 0;
+        if (forward.normalize() < 1e-4f)
             return;
+        const osg::Vec3f right(forward.y(), -forward.x(), 0);
 
-        osg::Vec3f knock = direction;
-        knock.z() += 0.2f;
+        // How the blow moves things: a thrust drives them ahead, a slash sweeps them aside, a chop knocks them
+        // forward and down.
+        osg::Vec3f knock = forward;
+        // A sweeping slash sends things flying further than it should otherwise; hold it back.
+        float attackTypeMult = 1.f;
+        if (attackType == ESM::Weapon::AT_Slash)
+        {
+            knock = forward * 0.4f - right * 0.9f;
+            attackTypeMult = 0.7f;
+        }
+        else if (attackType == ESM::Weapon::AT_Chop)
+            knock = forward * 0.9f - osg::Vec3f(0, 0, 0.3f);
         knock.normalize();
-        mPhysics->strikeObject(hit.mHitObject, knock * 500.f, hit.mHitPos, eye);
+
+        // Heavier weapons and fuller swings hit harder; heavier things move less.
+        const float weaponWeight = weapon.isEmpty() ? 5.f : std::max(weapon.getClass().getWeight(weapon), 1.f);
+        const float swingSpeed = (200.f + 500.f * attackStrength) * attackTypeMult;
+
+        static const float fCombatAngleXY
+            = getStore().get<ESM::GameSetting>().find("fCombatAngleXY")->mValue.getFloat() / 90.f;
+        const float bodyRadius = halfExtents.y();
+
+        constexpr size_t maxObjects = 6;
+        size_t knocked = 0;
+        // The player hits what they aim at first: order by how close to the line of sight. Others, nearest first.
+        std::vector<MWPhysics::PhysicsSystem::DynamicObjectInfo> candidates
+            = mPhysics->getDynamicObjectsInRange(feet, reach + bodyRadius + 50.f);
+        if (isPlayer)
+        {
+            osg::Vec3f aim = view;
+            aim.normalize();
+            const auto offAim = [&](const osg::Vec3f& point) {
+                osg::Vec3f toPoint = point - eye;
+                toPoint.normalize();
+                return -(toPoint * aim); // smaller is closer to the crosshair
+            };
+            std::stable_sort(candidates.begin(), candidates.end(),
+                [&](const auto& a, const auto& b) { return offAim(a.mCenter) < offAim(b.mCenter); });
+        }
+        for (const auto& [object, center, objectRadius] : candidates)
+        {
+            if (knocked >= maxObjects)
+                break;
+            if (!object.getClass().isItem(object))
+                continue;
+            if (isPlayer)
+            {
+                osg::Vec3f toCenter = center - eye;
+                const float elevation = std::asin(std::clamp(toCenter.z() / toCenter.length(), -1.f, 1.f));
+                if (std::abs(elevation - viewElevation) > maxElevationOffAim)
+                    continue;
+            }
+            osg::Vec2f toObject(center.x() - feet.x(), center.y() - feet.y());
+            const float distance = toObject.normalize() - bodyRadius;
+            if (distance > reach)
+                continue;
+            if (center.z() < feet.z() - 30.f || center.z() > feet.z() + halfExtents.z() * 2.f + 30.f)
+                continue;
+            // In front, within the attack arc (the same angle used for hitting actors).
+            if (toObject.x() * forward.x() + toObject.y() * forward.y() <= 0
+                || std::abs(toObject.x() * forward.y() - toObject.y() * forward.x()) > fCombatAngleXY)
+                continue;
+            // Not through walls (seen the way loose objects see them: a bookcase's shelves, not its outline). Any
+            // visible part will do: its middle, its top, or the side facing the attacker (a bottle under the shelf
+            // above may only show its front). What it sits on or in doesn't count, only something in between.
+            osg::Vec3f towardsEye = eye - center;
+            towardsEye.normalize();
+            const osg::Vec3f samples[] = { center, center + osg::Vec3f(0, 0, objectRadius * 0.8f),
+                center + towardsEye * (objectRadius * 0.8f) };
+            bool visible = false;
+            for (const osg::Vec3f& sample : samples)
+            {
+                const MWPhysics::RayCastingResult blocked = mPhysics->castRay(eye, sample, { attacker }, {},
+                    MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door
+                        | MWPhysics::CollisionType_HeightMap | MWPhysics::CollisionType_DynamicDetail,
+                    MWPhysics::CollisionType_Dynamic);
+                if (!blocked.mHit || (blocked.mHitPos - sample).length() <= objectRadius + 5.f)
+                {
+                    visible = true;
+                    break;
+                }
+            }
+            if (!visible)
+                continue;
+
+            const float objectWeight = std::clamp(object.getClass().getWeight(object), 0.2f, 50.f);
+            const float speed = swingSpeed * std::clamp(0.7f * std::sqrt(weaponWeight / objectWeight), 0.3f, 2.f);
+            mPhysics->strikeObject(object, knock * speed, center, eye);
+            ++knocked;
+        }
     }
 
     void World::doPhysics(float duration, osg::Timer_t frameStart, unsigned int frameNumber, osg::Stats& stats)

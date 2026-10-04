@@ -308,8 +308,11 @@ namespace MWBase
 
         /// Blow simulated objects away from an area effect at center.
         virtual void pushObjectsFromExplosion(const osg::Vec3f& center, float radius) = 0;
-        /// A melee attack that didn't hit anyone: knock a simulated object in reach, if any.
-        virtual void knockObjectInMeleeReach(const MWWorld::Ptr& attacker, float reach) = 0;
+        /// A melee attack that didn't hit anyone, at the moment it lands: knock simulated objects in its reach and
+        /// arc, in the direction of the attack type (an ESM::Weapon::AttackType).
+        virtual void knockObjectsWithMeleeAttack(
+            const MWWorld::Ptr& attacker, const MWWorld::Ptr& weapon, int attackType, float attackStrength)
+            = 0;
         virtual bool isPlayerAttackSuppressed() const = 0;
 
         virtual void rotateObject(
