@@ -1118,8 +1118,12 @@ namespace MWPhysics
                 if (deficit <= 0)
                     continue;
 
+                // A body (a ragdoll's part, not a simulated object) is a dead weight: walking into it only nudges it.
+                const auto* holder = static_cast<const PtrHolder*>(contact.mBody->getUserPointer());
+                const btScalar share = dynamic_cast<const Object*>(holder) == nullptr ? 0.25f : 1.f;
                 contact.mBody->activate(true);
-                contact.mBody->applyImpulse(direction * (deficit / contact.mBody->getInvMass()), relativePoint);            }
+                contact.mBody->applyImpulse(
+                    direction * (deficit * share / contact.mBody->getInvMass()), relativePoint);            }
         }
     }
 
