@@ -36,7 +36,6 @@
 #include "../mwrender/animation.hpp"
 
 #include "../mwbase/environment.hpp"
-#include "../mwphysics/ragdoll.hpp"
 #include "../mwbase/luamanager.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/soundmanager.hpp"
@@ -2868,22 +2867,13 @@ namespace MWMechanics
 
     bool CharacterController::startRagdoll()
     {
-        // Anyone with the standard (people's) skeleton, e.g. skeletons and dremora too; the rest play their death
-        // animation. Not the player (the death camera).
+        // Anyone with a skeleton; the rest play their death animation. Not the player (the death camera).
         if (!mAnimation || mPtr == getPlayer())
             return false;
-        std::map<std::string, osg::Matrixf, std::less<>> bones;
-        for (const std::string& bone : MWPhysics::Ragdoll::getRequiredBones())
-        {
-            const std::optional<osg::Matrixf> world = mAnimation->getBoneWorldMatrix(bone);
-            if (!world)
-                return false;
-            bones.emplace(bone, *world);
-        }
         CreatureStats& stats = mPtr.getClass().getCreatureStats(mPtr);
         const osg::Vec3f kick = stats.getDeathKick();
         stats.setDeathKick(osg::Vec3f());
-        if (!MWBase::Environment::get().getWorld()->createRagdoll(mPtr, bones, kick))
+        if (!MWBase::Environment::get().getWorld()->makeRagdoll(mPtr, kick, false))
             return false;
         mRagdoll = true;
         return true;

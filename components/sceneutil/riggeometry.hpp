@@ -49,6 +49,8 @@ namespace SceneUtil
         using BoneWeights = std::vector<BoneWeight>;
 
         void setBoneInfo(std::vector<BoneInfo>&& bones);
+        /// The bones that move this mesh; each bound sphere (in the bone's space) holds the vertices it moves.
+        const std::vector<BoneInfo>& getBoneInfo() const;
         // Convert influences in bone and weight list per vertex format
         void setInfluences(const std::vector<BoneWeights>& influences);
 

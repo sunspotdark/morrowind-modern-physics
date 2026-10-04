@@ -824,6 +824,18 @@ namespace MWPhysics
         mDynamicsWorld->removeConstraint(constraint);
     }
 
+    void PhysicsTaskScheduler::addAction(btActionInterface* action)
+    {
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        mDynamicsWorld->addAction(action);
+    }
+
+    void PhysicsTaskScheduler::removeAction(btActionInterface* action)
+    {
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        mDynamicsWorld->removeAction(action);
+    }
+
     void PhysicsTaskScheduler::removeCollisionObject(btCollisionObject* collisionObject)
     {
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);

@@ -280,6 +280,8 @@ namespace MWPhysics
         mCollisionWorld = std::make_unique<DynamicsWorld>(
             mDispatcher.get(), mBroadphase.get(), mConstraintSolver.get(), mCollisionConfiguration.get());
         mCollisionWorld->setGravity(btVector3(0, 0, -Constants::GravityConst * Constants::UnitsPerMeter));
+        // Ragdolls are long chains of joints; more solver passes keep them from stretching.
+        mCollisionWorld->getSolverInfo().m_numIterations = 20;
 
         // Don't update AABBs of all objects every frame. Most objects in MW are static, so we don't need this.
         // Should a "static" object ever be moved, we have to update its AABB manually using
@@ -708,6 +710,25 @@ namespace MWPhysics
         return true;
     }
 
+    bool PhysicsSystem::createSkinnedRagdoll(
+        const MWWorld::Ptr& actor, const std::vector<Ragdoll::SkinnedBone>& bones, const osg::Vec3f& kick)
+    {
+        osg::Vec3f velocity;
+        if (const auto found = mActors.find(actor.mRef); found != mActors.end())
+        {
+            velocity = (found->second->getPosition() - found->second->getPreviousPosition()) / mPhysicsDt;
+            constexpr float maxSpeed = 600.f;
+            if (velocity.length2() > maxSpeed * maxSpeed)
+                velocity *= maxSpeed / velocity.length();
+        }
+        std::unique_ptr<Ragdoll> ragdoll = Ragdoll::fromSkeleton(actor, bones, velocity, kick, mTaskScheduler.get());
+        if (ragdoll == nullptr)
+            return false;
+        mRagdolls.erase(actor.mRef);
+        mRagdolls.emplace(actor.mRef, std::move(ragdoll));
+        return true;
+    }
+
     bool PhysicsSystem::createCorpseBody(const MWWorld::Ptr& actor)
     {
         const auto found = mActors.find(actor.mRef);
@@ -843,8 +864,9 @@ namespace MWPhysics
                 mTaskScheduler->holdObject(part, false, 0, Misc::Convert::toBullet(*grabPoint));
                 return true;
             }
-            // Gripped firmly enough to drag the rest of the body along; it hangs as it likes.
-            constexpr btScalar gripMass = 30.f;
+            // Gripped firmly enough to drag the rest of the body along (a heavy beast takes a heavier grip); it
+            // hangs as it likes.
+            const btScalar gripMass = std::clamp(ragdoll->second->getMass() * 0.6f, 30.f, 300.f);
             mTaskScheduler->holdObject(part, false, gripMass);
             return true;
         }
@@ -1363,7 +1385,6 @@ namespace MWPhysics
         if (!mActors.empty())
             mActorsPositions.reserve(mActors.size() - 1);
         std::vector<std::pair<MWWorld::Ptr, osg::Vec3f>> bodyPositions;
-        const float interpolation = std::clamp(mTimeAccum / mPhysicsDt, 0.f, 1.f);
         for (const auto& [ptr, physicActor] : mActors)
         {
             if (physicActor.get() == player)
@@ -1372,7 +1393,8 @@ namespace MWPhysics
             {
                 // A body in one piece carries the actor along (so it is there after loading, too); a limp one
                 // leaves it where it died, only its bones move.
-                const auto poses = ragdoll->second->getBonePoses(interpolation);
+                // As its model was posed this frame (see getRagdollBonePoses).
+                const auto& poses = ragdoll->second->getLastBonePoses();
                 if (poses.size() == 1 && poses.front().first.empty())
                 {
                     osg::Vec3f translation;

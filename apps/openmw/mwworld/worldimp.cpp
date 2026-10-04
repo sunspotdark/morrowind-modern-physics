@@ -1401,26 +1401,8 @@ namespace MWWorld
             return false;
         // Bodies only go limp as they die, so one from before a save (or placed dead) lies in its death pose
         // until picked up.
-        if (canRagdollCorpse(ptr) && getRagdollBonePoses(ptr).empty())
-        {
-            const MWRender::Animation* animation = mRendering->getAnimation(ptr);
-            if (animation == nullptr)
-                return false;
-            // With the standard (people's) skeleton, limp; otherwise in one piece.
-            std::map<std::string, osg::Matrixf, std::less<>> bones;
-            for (const std::string& bone : MWPhysics::Ragdoll::getRequiredBones())
-            {
-                const std::optional<osg::Matrixf> world = animation->getBoneWorldMatrix(bone);
-                if (!world)
-                    break;
-                bones.emplace(bone, *world);
-            }
-            const bool made = bones.size() == MWPhysics::Ragdoll::getRequiredBones().size()
-                ? createRagdoll(ptr, bones, osg::Vec3f())
-                : createCorpseBody(ptr);
-            if (!made)
-                return false;
-        }
+        if (canRagdollCorpse(ptr) && getRagdollBonePoses(ptr).empty() && !makeRagdoll(ptr, osg::Vec3f(), true))
+            return false;
         const MWRender::Camera* camera = mRendering->getCamera();
         return mPhysics->holdObject(ptr, camera->getPosition(), camera->getOrient() * osg::Vec3f(0, 1, 0));
     }
@@ -1441,20 +1423,37 @@ namespace MWWorld
         return mPhysics->isHoldingObject();
     }
 
-    bool World::createRagdoll(
-        const MWWorld::Ptr& actor, const std::map<std::string, osg::Matrixf, std::less<>>& bones, const osg::Vec3f& kick)
-    {
-        return mPhysics->createRagdoll(actor, bones, kick);
-    }
-
     std::vector<std::pair<std::string, osg::Matrixf>> World::getRagdollBonePoses(const MWWorld::ConstPtr& actor) const
     {
         return mPhysics->getRagdollBonePoses(actor);
     }
 
-    bool World::createCorpseBody(const MWWorld::Ptr& actor)
+    bool World::makeRagdoll(const MWWorld::Ptr& actor, const osg::Vec3f& kick, bool allowOnePiece)
     {
-        return mPhysics->createCorpseBody(actor);
+        const MWRender::Animation* animation = mRendering->getAnimation(actor);
+        if (animation == nullptr)
+            return false;
+
+        // People's skeleton (also skeletons, dremora...): the hand-made body.
+        std::map<std::string, osg::Matrixf, std::less<>> bones;
+        for (const std::string& bone : MWPhysics::Ragdoll::getRequiredBones())
+        {
+            const std::optional<osg::Matrixf> world = animation->getBoneWorldMatrix(bone);
+            if (!world)
+                break;
+            bones.emplace(bone, *world);
+        }
+        if (bones.size() == MWPhysics::Ragdoll::getRequiredBones().size())
+            return mPhysics->createRagdoll(actor, bones, kick);
+
+        // Any other skinned body: parts fitted to the mesh.
+        std::vector<MWPhysics::Ragdoll::SkinnedBone> skinned;
+        for (const MWRender::Animation::SkinnedBone& bone : animation->getSkinnedBones())
+            skinned.push_back({ bone.mName, bone.mParent, bone.mWorld, bone.mCenter, bone.mRadius });
+        if (mPhysics->createSkinnedRagdoll(actor, skinned, kick))
+            return true;
+
+        return allowOnePiece && mPhysics->createCorpseBody(actor);
     }
 
     void World::removeRagdoll(const MWWorld::ConstPtr& actor)

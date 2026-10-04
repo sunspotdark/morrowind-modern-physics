@@ -17,6 +17,8 @@
 #include <osgAnimation/UpdateBone>
 
 #include <components/debug/debuglog.hpp>
+#include <components/misc/strings/lower.hpp>
+#include <components/sceneutil/riggeometry.hpp>
 
 #include <components/resource/animblendrulesmanager.hpp>
 #include <components/resource/keyframemanager.hpp>
@@ -1080,6 +1082,86 @@ namespace MWRender
     {
         mStates.clear();
         resetActiveGroups();
+    }
+
+    std::vector<Animation::SkinnedBone> Animation::getSkinnedBones() const
+    {
+        // What each bone moves, over all the skinned meshes.
+        class BoundsVisitor : public osg::NodeVisitor
+        {
+        public:
+            BoundsVisitor()
+                : osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
+            {
+            }
+
+            void apply(osg::Drawable& drawable) override
+            {
+                const auto* rig = dynamic_cast<const SceneUtil::RigGeometry*>(&drawable);
+                if (rig == nullptr)
+                    return;
+                for (const SceneUtil::RigGeometry::BoneInfo& info : rig->getBoneInfo())
+                {
+                    if (!info.mBoundSphere.valid())
+                        continue;
+                    const auto [found, inserted]
+                        = mBounds.emplace(Misc::StringUtils::lowerCase(info.mName), info.mBoundSphere);
+                    if (!inserted)
+                        found->second.expandBy(info.mBoundSphere);
+                }
+            }
+
+            std::map<std::string, osg::BoundingSpheref> mBounds;
+        };
+
+        if (mObjectRoot == nullptr)
+            return {};
+        BoundsVisitor visitor;
+        mObjectRoot->accept(visitor);
+
+        std::map<const osg::Node*, std::string> bones;
+        for (const auto& [name, sphere] : visitor.mBounds)
+            if (const auto found = getNodeMap().find(name); found != getNodeMap().end())
+                bones.emplace(found->second.get(), name);
+
+        // Parents first: by depth in the scene graph.
+        struct Entry
+        {
+            const osg::Node* mNode;
+            const osg::Node* mParent;
+            int mDepth;
+        };
+        std::vector<Entry> entries;
+        for (const auto& [node, name] : bones)
+        {
+            Entry entry{ node, nullptr, 0 };
+            for (const osg::Node* up = node; up->getNumParents() > 0;)
+            {
+                up = up->getParent(0);
+                ++entry.mDepth;
+                if (entry.mParent == nullptr && bones.count(up) != 0)
+                    entry.mParent = up;
+            }
+            entries.push_back(entry);
+        }
+        std::stable_sort(
+            entries.begin(), entries.end(), [](const Entry& a, const Entry& b) { return a.mDepth < b.mDepth; });
+
+        std::vector<SkinnedBone> result;
+        std::map<const osg::Node*, int> indices;
+        for (const Entry& entry : entries)
+        {
+            const std::string& name = bones[entry.mNode];
+            const std::optional<osg::Matrixf> world = getBoneWorldMatrix(name);
+            if (!world)
+                continue;
+            const osg::BoundingSpheref& sphere = visitor.mBounds[name];
+            const auto parent = indices.find(entry.mParent);
+            indices.emplace(entry.mNode, static_cast<int>(result.size()));
+            result.push_back({ name, parent != indices.end() ? parent->second : -1, *world, sphere.center(),
+                sphere.radius() });
+        }
+        return result;
     }
 
     void Animation::attachStuckProjectile(

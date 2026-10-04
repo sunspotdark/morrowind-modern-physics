@@ -307,17 +307,13 @@ namespace MWBase
         /// Stops the player's weapon/spell use (e.g. so clicking to throw doesn't also attack).
         virtual void setPlayerAttackSuppressed(bool suppressed) = 0;
 
-        /// Ragdolls for dead actors: bones are the starting world matrices of the bones it needs (the standard
-        /// skeleton), kick how the killing blow throws the body. @return false if it can't be made.
-        virtual bool createRagdoll(const MWWorld::Ptr& actor,
-            const std::map<std::string, osg::Matrixf, std::less<>>& bones, const osg::Vec3f& kick)
-            = 0;
-        /// The ragdoll's bones (world matrices, parents first); empty if it has none.
+        /// Ragdolls for dead actors. The ragdoll's bones (world matrices, parents first); empty if it has none.
         virtual std::vector<std::pair<std::string, osg::Matrixf>> getRagdollBonePoses(
             const MWWorld::ConstPtr& actor) const
             = 0;
-        /// A dead actor without the standard skeleton, as one body that its model follows.
-        virtual bool createCorpseBody(const MWWorld::Ptr& actor) = 0;
+        /// Make a dead actor's body a ragdoll: limp if it has a skeleton, else (if allowOnePiece) in one piece, its
+        /// model following. kick is how the killing blow throws it. @return false if it can't be made.
+        virtual bool makeRagdoll(const MWWorld::Ptr& actor, const osg::Vec3f& kick, bool allowOnePiece) = 0;
         virtual void removeRagdoll(const MWWorld::ConstPtr& actor) = 0;
 
         /// A simulated object fell into water here, going down at speed: ripples, and a splash if fast.

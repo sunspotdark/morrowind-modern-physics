@@ -27,6 +27,7 @@
 #include "../mwworld/ptr.hpp"
 
 #include "collisiontype.hpp"
+#include "ragdoll.hpp"
 #include "raycasting.hpp"
 
 namespace osg
@@ -201,7 +202,10 @@ namespace MWPhysics
             const osg::Vec3f& kick);
         /// The simulated bones of the actor's ragdoll (world matrices, parents first); empty without one.
         std::vector<std::pair<std::string, osg::Matrixf>> getRagdollBonePoses(const MWWorld::ConstPtr& actor) const;
-        /// A dead actor without the standard skeleton, as one body that its model follows.
+        /// For any skinned body (see Ragdoll::fromSkeleton). @return false if it can't be made.
+        bool createSkinnedRagdoll(
+            const MWWorld::Ptr& actor, const std::vector<Ragdoll::SkinnedBone>& bones, const osg::Vec3f& kick);
+        /// A dead actor without a skinned body, as one body that its model follows.
         bool createCorpseBody(const MWWorld::Ptr& actor);
         void removeRagdoll(const MWWorld::ConstPtr& actor);
         bool hasRagdoll(const MWWorld::ConstPtr& actor) const;

@@ -394,11 +394,9 @@ namespace MWWorld
         void setPlayerAttackSuppressed(bool suppressed) override { mPlayerAttackSuppressed = suppressed; }
         void pushObjectsFromExplosion(const osg::Vec3f& center, float radius) override;
         void objectEnteredWater(const osg::Vec3f& position, float speed) override;
-        bool createRagdoll(const MWWorld::Ptr& actor, const std::map<std::string, osg::Matrixf, std::less<>>& bones,
-            const osg::Vec3f& kick) override;
         std::vector<std::pair<std::string, osg::Matrixf>> getRagdollBonePoses(
             const MWWorld::ConstPtr& actor) const override;
-        bool createCorpseBody(const MWWorld::Ptr& actor) override;
+        bool makeRagdoll(const MWWorld::Ptr& actor, const osg::Vec3f& kick, bool allowOnePiece) override;
         void removeRagdoll(const MWWorld::ConstPtr& actor) override;
         void knockObjectsWithMeleeAttack(const MWWorld::Ptr& attacker, const MWWorld::Ptr& weapon, int attackType,
             float attackStrength) override;

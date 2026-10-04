@@ -16,6 +16,7 @@
 class btDiscreteDynamicsWorld;
 class btRigidBody;
 class btTypedConstraint;
+class btActionInterface;
 class btPoint2PointConstraint;
 
 #include <osg/Timer>
@@ -75,6 +76,9 @@ namespace MWPhysics
         /// A joint between two rigid bodies already added (its bodies don't collide with each other).
         void addConstraint(btTypedConstraint* constraint);
         void removeConstraint(btTypedConstraint* constraint);
+        /// Something run every simulation step (inside it, with the world locked).
+        void addAction(btActionInterface* action);
+        void removeAction(btActionInterface* action);
 
         // Carrying a dynamic object: each physics step it is steered towards the hold target.
         /// steerRotation: also turn it to the target orientation. holdMass: if set, its mass while held (a heavier

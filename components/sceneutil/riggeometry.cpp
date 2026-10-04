@@ -330,6 +330,12 @@ namespace SceneUtil
         mData->mBones = std::move(bones);
     }
 
+    const std::vector<RigGeometry::BoneInfo>& RigGeometry::getBoneInfo() const
+    {
+        static const std::vector<BoneInfo> none;
+        return mData != nullptr ? mData->mBones : none;
+    }
+
     void RigGeometry::setInfluences(const std::vector<BoneWeights>& influences)
     {
         if (!mData)

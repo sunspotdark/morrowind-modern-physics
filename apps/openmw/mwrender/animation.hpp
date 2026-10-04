@@ -471,6 +471,18 @@ namespace MWRender
         /// Stop every animation, leaving the bones as they are.
         void stopAllAnimations();
 
+        /// A bone of the skinned meshes, and the bounds (in its own space) of the vertices it moves.
+        struct SkinnedBone
+        {
+            std::string mName;
+            int mParent; // index of the closest such ancestor, -1 for none
+            osg::Matrixf mWorld;
+            osg::Vec3f mCenter;
+            float mRadius;
+        };
+        /// The bones of the skinned meshes, parents first.
+        std::vector<SkinnedBone> getSkinnedBones() const;
+
         /// Show a projectile model stuck in the body: it flew along direction (normalized) and hit near hitPosition.
         /// It is attached to the closest bone, so it moves with the body. Visual only; the oldest ones are removed
         /// once there are too many.
