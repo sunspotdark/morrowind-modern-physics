@@ -1626,6 +1626,10 @@ namespace MWPhysics
         const Visitors::Sync vis{ mAdvanceSimulation, mTimeAccum, mPhysicsDt, this };
         for (auto& sim : *mSimulations)
             std::visit(vis, sim);
+        // Simulated objects are shown as of here too, between their last two steps like the actors.
+        if (mAdvanceSimulation)
+            mStepGeneration.fetch_add(1, std::memory_order_release);
+        mSyncInterpolation = std::clamp(mTimeAccum / mPhysicsDt, 0.f, 1.f);
         mSimulations->clear();
         mSimulations = nullptr;
     }

@@ -94,6 +94,12 @@ namespace MWPhysics
         void releaseHeldObject(const std::optional<btVector3>& velocity);
         std::shared_ptr<PtrHolder> getHeldObject() const;
 
+        /// Counts the simulation runs that stepped (as of the last sync with the main thread).
+        const std::atomic<unsigned>& getStepGeneration() const { return mStepGeneration; }
+        /// How far from the last step to the next the main thread is (as of the last sync), for showing
+        /// simulated objects between steps.
+        float getSyncInterpolation() const { return mSyncInterpolation; }
+
         /// Change the velocity of dynamic objects as if struck at a world point (velocityChange is independent
         /// of the object's mass). Ignores the held object.
         struct Strike
@@ -170,6 +176,8 @@ namespace MWPhysics
         int mNumRigidBodies = 0;
         std::atomic<bool> mHasWater{ false };
         std::atomic<float> mWaterHeight{ 0.f };
+        std::atomic<unsigned> mStepGeneration{ 0 };
+        float mSyncInterpolation = 1.f;
         std::weak_ptr<PtrHolder> mHeldObject;
         bool mHoldSteerRotation = true;
         btScalar mHeldRestoreMass = 0; // the mass to give back on release, if changed while held

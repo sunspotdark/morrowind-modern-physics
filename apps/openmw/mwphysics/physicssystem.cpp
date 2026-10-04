@@ -1483,11 +1483,12 @@ namespace MWPhysics
         const auto world = MWBase::Environment::get().getWorld();
         // Moving an object out of the active cells removes it from mDynamicObjects; iterate over a copy.
         const std::vector<std::shared_ptr<Object>> objects = mDynamicObjects;
+        const float interpolation = mTaskScheduler->getSyncInterpolation();
         mMovingDynamicObjects = true;
         for (const auto& object : objects)
         {
             const float heightBefore = static_cast<float>(object->getTransform().getOrigin().z());
-            const auto transform = object->takeSimulatedTransform();
+            const auto transform = object->takeSimulatedTransform(interpolation);
             if (!transform)
                 continue;
 

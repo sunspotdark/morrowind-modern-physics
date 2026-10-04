@@ -58,7 +58,9 @@ namespace MWPhysics
 
         /// For dynamic objects: if the simulation moved the body since the last call, return the
         /// new position and rotation of the object's origin (as opposed to its center of mass).
-        std::optional<std::pair<osg::Vec3f, osg::Quat>> takeSimulatedTransform();
+        /// interpolation: how far from the last simulation step to the next it is (see
+        /// PhysicsTaskScheduler::getSyncInterpolation)
+        std::optional<std::pair<osg::Vec3f, osg::Quat>> takeSimulatedTransform(float interpolation);
 
         /// For dynamic objects: world-space height of the lowest and highest point of the simulated shape.
         std::pair<float, float> getDynamicShapeHeightRange() const;

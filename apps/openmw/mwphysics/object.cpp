@@ -1,6 +1,7 @@
 #include "object.hpp"
 #include "mtphysics.hpp"
 #include <algorithm>
+#include <atomic>
 #include <memory>
 
 #include <components/bullethelpers/collisionobject.hpp>
@@ -21,48 +22,79 @@
 
 namespace MWPhysics
 {
-    // Receives body transforms from Bullet on the physics thread; the main thread picks them up.
+    // Receives body transforms from Bullet on the physics thread; the main thread picks them up. It shows the body
+    // as it was when the physics thread last synced with the main thread (later steps may be under way), between
+    // its last two steps, so it moves smoothly at any frame rate.
     class DynamicMotionState final : public btMotionState
     {
     public:
-        explicit DynamicMotionState(const btTransform& transform)
-            : mTransform(transform)
+        DynamicMotionState(const btTransform& transform, const std::atomic<unsigned>& stepGeneration)
+            : mStepGeneration(stepGeneration)
         {
+            reset(transform);
+            mShown = transform; // where the game object already is
         }
 
         void getWorldTransform(btTransform& transform) const override
         {
             std::lock_guard lock(mMutex);
-            transform = mTransform;
+            transform = mLive.mCurrent;
         }
 
         void setWorldTransform(const btTransform& transform) override
         {
             std::lock_guard lock(mMutex);
-            mTransform = transform;
-            mDirty = true;
+            const unsigned generation = mStepGeneration.load(std::memory_order_acquire);
+            // The first step of a new run: keep what the main thread is to see until the run is synced.
+            if (mLive.mGeneration != generation)
+                mSynced = mLive;
+            mLive.mPrevious = mLive.mCurrent;
+            mLive.mCurrent = transform;
+            mLive.mGeneration = generation;
         }
 
-        std::optional<btTransform> take()
+        /// What to show now, interpolation being how far from the last step to the next it is; nothing if the
+        /// body is where it was last shown.
+        std::optional<btTransform> take(float interpolation)
         {
             std::lock_guard lock(mMutex);
-            if (!mDirty)
+            const unsigned generation = mStepGeneration.load(std::memory_order_acquire);
+            // Written to since the last sync: those steps aren't to be seen yet.
+            const Steps& steps = mLive.mGeneration == generation ? mSynced : mLive;
+            btTransform shown = steps.mCurrent;
+            // Moved in the last run that stepped: between its last two steps. Otherwise it has stopped there.
+            if (steps.mGeneration + 1 == generation)
+                shown = btTransform(steps.mPrevious.getRotation().slerp(steps.mCurrent.getRotation(), interpolation),
+                    steps.mPrevious.getOrigin().lerp(steps.mCurrent.getOrigin(), interpolation));
+            if (shown == mShown)
                 return std::nullopt;
-            mDirty = false;
-            return mTransform;
+            mShown = shown;
+            return shown;
         }
 
+        /// Put somewhere (not by the simulation), at rest.
         void reset(const btTransform& transform)
         {
             std::lock_guard lock(mMutex);
-            mTransform = transform;
-            mDirty = false;
+            // As if it had stopped there in the last run, so it is shown there at once.
+            const unsigned generation = mStepGeneration.load(std::memory_order_acquire);
+            mLive = Steps{ transform, transform, generation - 1 };
+            mSynced = mLive;
         }
 
     private:
+        struct Steps
+        {
+            btTransform mPrevious;
+            btTransform mCurrent;
+            unsigned mGeneration; // of the run that stepped them
+        };
+
+        const std::atomic<unsigned>& mStepGeneration;
         mutable std::mutex mMutex;
-        btTransform mTransform;
-        bool mDirty = false;
+        Steps mLive;
+        Steps mSynced;
+        btTransform mShown = btTransform::getIdentity();
     };
 
     Object::Object(const MWWorld::Ptr& ptr, std::shared_ptr<Resource::BulletShapeInstance> shapeInstance,
@@ -150,7 +182,7 @@ namespace MWPhysics
         mLocalInertia = inertia;
 
         const btTransform centerOfMass = getTransform() * btTransform(btQuaternion::getIdentity(), mCenterOffset);
-        mMotionState = std::make_unique<DynamicMotionState>(centerOfMass);
+        mMotionState = std::make_unique<DynamicMotionState>(centerOfMass, mTaskScheduler->getStepGeneration());
         mPlacedPosition = mPosition;
 
         btRigidBody::btRigidBodyConstructionInfo info(mass, mMotionState.get(), mDynamicShape.get(), inertia);
@@ -268,11 +300,11 @@ namespace MWPhysics
         mTransformUpdatePending = true;
     }
 
-    std::optional<std::pair<osg::Vec3f, osg::Quat>> Object::takeSimulatedTransform()
+    std::optional<std::pair<osg::Vec3f, osg::Quat>> Object::takeSimulatedTransform(float interpolation)
     {
         if (mMotionState == nullptr)
             return std::nullopt;
-        const std::optional<btTransform> centerOfMass = mMotionState->take();
+        const std::optional<btTransform> centerOfMass = mMotionState->take(interpolation);
         if (!centerOfMass)
             return std::nullopt;
         const btTransform origin = *centerOfMass * btTransform(btQuaternion::getIdentity(), -mCenterOffset);
@@ -339,8 +371,8 @@ namespace MWPhysics
                 mRigidBody->setInterpolationLinearVelocity(btVector3(0, 0, 0));
                 mRigidBody->setInterpolationAngularVelocity(btVector3(0, 0, 0));
                 mRigidBody->clearForces();
-                // Marks the transform as changed, so the game object follows if the move came from moveBy.
-                mMotionState->setWorldTransform(centerOfMass);
+                // Shown there at once, so the game object follows if the move came from moveBy.
+                mMotionState->reset(centerOfMass);
                 mPlacedPosition = mPosition;
                 mRigidBody->activate(true);
             }
