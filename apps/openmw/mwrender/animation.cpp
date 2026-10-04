@@ -1052,6 +1052,36 @@ namespace MWRender
         mTextKeyListener = listener;
     }
 
+    std::optional<osg::Matrixf> Animation::getBoneWorldMatrix(std::string_view bone) const
+    {
+        const auto found = getNodeMap().find(std::string(bone));
+        if (found == getNodeMap().end())
+            return std::nullopt;
+        const osg::NodePathList paths = found->second->getParentalNodePaths();
+        if (paths.empty())
+            return std::nullopt;
+        return osg::computeLocalToWorld(paths.front());
+    }
+
+    void Animation::setBoneWorldMatrix(std::string_view bone, const osg::Matrixf& world)
+    {
+        const auto found = getNodeMap().find(std::string(bone));
+        if (found == getNodeMap().end())
+            return;
+        osg::NodePathList paths = found->second->getParentalNodePaths();
+        if (paths.empty())
+            return;
+        osg::NodePath& toParent = paths.front();
+        toParent.pop_back();
+        found->second->setMatrix(world * osg::Matrixf::inverse(osg::computeLocalToWorld(toParent)));
+    }
+
+    void Animation::stopAllAnimations()
+    {
+        mStates.clear();
+        resetActiveGroups();
+    }
+
     void Animation::attachStuckProjectile(
         VFS::Path::NormalizedView model, const osg::Vec3f& hitPosition, const osg::Vec3f& direction)
     {

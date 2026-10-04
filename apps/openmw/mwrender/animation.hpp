@@ -464,6 +464,13 @@ namespace MWRender
         /// @note The matching is case-insensitive.
         const osg::Node* getNode(std::string_view name) const;
 
+        /// For ragdolls: where a bone is (world matrix), and putting it somewhere. Only bones no animation drives
+        /// stay where they're put (see stopAllAnimations).
+        std::optional<osg::Matrixf> getBoneWorldMatrix(std::string_view bone) const;
+        void setBoneWorldMatrix(std::string_view bone, const osg::Matrixf& world);
+        /// Stop every animation, leaving the bones as they are.
+        void stopAllAnimations();
+
         /// Show a projectile model stuck in the body: it flew along direction (normalized) and hit near hitPosition.
         /// It is attached to the closest bone, so it moves with the body. Visual only; the oldest ones are removed
         /// once there are too many.

@@ -36,6 +36,7 @@
 #include "../mwrender/animation.hpp"
 
 #include "../mwbase/environment.hpp"
+#include "../mwphysics/ragdoll.hpp"
 #include "../mwbase/luamanager.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/soundmanager.hpp"
@@ -888,6 +889,25 @@ namespace MWMechanics
         // Do not interrupt scripted animation by death
         if (!mAnimation || isScriptedAnimPlaying())
             return;
+
+        // The body goes limp right away: a ragdoll instead of a death animation (which is still recorded, for
+        // how the corpse lies after loading a save). Only as it dies; a ragdoll already going keeps going.
+        if (mRagdoll)
+            return;
+        if (mDying && startRagdoll())
+        {
+            mCurrentDeath = deathStateToAnimGroup(mDeathState);
+            CreatureStats& stats = mPtr.getClass().getCreatureStats(mPtr);
+            stats.setDeathAnimation(static_cast<signed char>(mDeathState - CharState_Death1));
+            resetCurrentMovementState();
+            resetCurrentWeaponState();
+            resetCurrentHitState();
+            resetCurrentIdleState();
+            resetCurrentJumpState();
+            mAnimation->stopAllAnimations();
+            stats.setDeathAnimationFinished(true);
+            return;
+        }
 
         playDeath(startpoint, mDeathState);
     }
@@ -2437,6 +2457,9 @@ namespace MWMechanics
         }
         else if (cls.getCreatureStats(mPtr).isDead())
         {
+            if (mRagdoll)
+                driveRagdoll();
+
             // initial start of death animation for actors that started the game as dead
             // not done in constructor since we need to give scripts a chance to set the mSkipAnim flag
             if (!mSkipAnim && mDeathState != CharState_None && mCurrentDeath.empty())
@@ -2810,7 +2833,9 @@ namespace MWMechanics
     {
         if (mDeathState == CharState_None)
         {
+            mDying = true;
             playRandomDeath();
+            mDying = false;
             resetCurrentIdleState();
             return Result_DeathAnimStarted;
         }
@@ -2828,11 +2853,54 @@ namespace MWMechanics
 
     void CharacterController::resurrect()
     {
+        if (mRagdoll)
+        {
+            MWBase::Environment::get().getWorld()->removeRagdoll(mPtr);
+            mRagdoll = false;
+        }
+
         if (mDeathState == CharState_None)
             return;
 
         resetCurrentDeathState();
         mWeaponTypeId = {};
+    }
+
+    bool CharacterController::startRagdoll()
+    {
+        // People only for now: they all share the standard skeleton. Not the player (the death camera).
+        if (!mAnimation || mPtr == getPlayer() || !mPtr.getClass().isNpc())
+            return false;
+        std::map<std::string, osg::Matrixf, std::less<>> bones;
+        for (const std::string& bone : MWPhysics::Ragdoll::getRequiredBones())
+        {
+            const std::optional<osg::Matrixf> world = mAnimation->getBoneWorldMatrix(bone);
+            if (!world)
+                return false;
+            bones.emplace(bone, *world);
+        }
+        CreatureStats& stats = mPtr.getClass().getCreatureStats(mPtr);
+        const osg::Vec3f kick = stats.getDeathKick();
+        stats.setDeathKick(osg::Vec3f());
+        if (!MWBase::Environment::get().getWorld()->createRagdoll(mPtr, bones, kick))
+            return false;
+        mRagdoll = true;
+        return true;
+    }
+
+    void CharacterController::driveRagdoll()
+    {
+        const std::vector<std::pair<std::string, osg::Matrixf>> poses
+            = MWBase::Environment::get().getWorld()->getRagdollBonePoses(mPtr);
+        if (poses.empty())
+        {
+            // Gone (unloaded with its cell); it comes back in its death pose.
+            mRagdoll = false;
+            return;
+        }
+        // Parents first, so each bone is placed relative to where its parent now is.
+        for (const auto& [bone, world] : poses)
+            mAnimation->setBoneWorldMatrix(bone, world);
     }
 
     void CharacterController::updateContinuousVfx() const

@@ -811,6 +811,18 @@ namespace MWPhysics
         ++mNumRigidBodies;
     }
 
+    void PhysicsTaskScheduler::addConstraint(btTypedConstraint* constraint)
+    {
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        mDynamicsWorld->addConstraint(constraint, true);
+    }
+
+    void PhysicsTaskScheduler::removeConstraint(btTypedConstraint* constraint)
+    {
+        MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
+        mDynamicsWorld->removeConstraint(constraint);
+    }
+
     void PhysicsTaskScheduler::removeCollisionObject(btCollisionObject* collisionObject)
     {
         MaybeExclusiveLock lock(mCollisionWorldMutex, mLockingPolicy);
@@ -1188,7 +1200,9 @@ namespace MWPhysics
             // each by how deep it is, so the deeper side gets pushed up harder and the object turns into a
             // natural floating position (a bottle on its side, a book flat) instead of keeping whatever angle it
             // landed at.
-            const auto* object = static_cast<const Object*>(static_cast<const PtrHolder*>(body->getUserPointer()));
+            // Items know how dense they are; anything else (a body) is about as dense as water.
+            const auto* object = dynamic_cast<const Object*>(static_cast<const PtrHolder*>(body->getUserPointer()));
+            const float relativeDensity = object != nullptr ? object->getRelativeDensity() : 1.05f;
             const btScalar mass = 1 / body->getInvMass();
             btVector3 localMin;
             btVector3 localMax;
@@ -1198,7 +1212,7 @@ namespace MWPhysics
             const btScalar pointRadius = std::max(halfExtents[halfExtents.minAxis()], btScalar(1));
             const btTransform& transform = body->getWorldTransform();
             constexpr int numPoints = 9; // the center and the eight corners, pulled in a bit
-            const btVector3 pointBuoyancy = -gravity * (mass / object->getRelativeDensity() / numPoints);
+            const btVector3 pointBuoyancy = -gravity * (mass / relativeDensity / numPoints);
             btScalar submerged = 0;
             for (int p = 0; p < numPoints; ++p)
             {
@@ -1220,7 +1234,7 @@ namespace MWPhysics
             // speed), so whatever hits the water hard is caught by it instead of skipping off the surface.
             constexpr btScalar waterDrag = 4.f; // per second, fully submerged, at rest, for water-dense things
             const btScalar speed = body->getLinearVelocity().length();
-            const btScalar drag = waterDrag * std::max(btScalar(1), btScalar(1 / object->getRelativeDensity()))
+            const btScalar drag = waterDrag * std::max(btScalar(1), btScalar(1 / relativeDensity))
                 * (1 + speed / 400.f);
             const btScalar damping = std::max(btScalar(0.3), 1 - drag * submerged * mPhysicsDt);
             body->setLinearVelocity(body->getLinearVelocity() * damping);

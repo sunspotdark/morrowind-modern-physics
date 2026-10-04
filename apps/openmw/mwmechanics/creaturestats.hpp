@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <string>
 
+#include <osg/Vec3f>
+
 #include "activespells.hpp"
 #include "aisequence.hpp"
 #include "aisetting.hpp"
@@ -59,6 +61,7 @@ namespace MWMechanics
         bool mKnockdownOverOneFrame = false;
         bool mHitRecovery = false;
         bool mBlock = false;
+        osg::Vec3f mDeathKick; // how the killing blow throws the body
         unsigned int mMovementFlags = 0;
 
         float mFallHeight = 0.f;
@@ -230,6 +233,10 @@ namespace MWMechanics
         bool getHitRecovery() const;
         void setBlock(bool value);
         bool getBlock() const;
+
+        /// How the killing blow throws the body (velocity change; not saved).
+        void setDeathKick(const osg::Vec3f& kick) { mDeathKick = kick; }
+        const osg::Vec3f& getDeathKick() const { return mDeathKick; }
 
         std::multimap<ESM::RefId, ESM::RefNum>& getSummonedCreatureMap(); // <Effect, summoned creature>
 

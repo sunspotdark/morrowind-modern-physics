@@ -15,6 +15,7 @@
 
 class btDiscreteDynamicsWorld;
 class btRigidBody;
+class btTypedConstraint;
 
 #include <osg/Timer>
 
@@ -70,6 +71,9 @@ namespace MWPhysics
         void setCollisionFilterMask(btCollisionObject* collisionObject, int collisionFilterMask);
         void addCollisionObject(btCollisionObject* collisionObject, int collisionFilterGroup, int collisionFilterMask);
         void addRigidBody(btRigidBody* body, int collisionFilterGroup, int collisionFilterMask);
+        /// A joint between two rigid bodies already added (its bodies don't collide with each other).
+        void addConstraint(btTypedConstraint* constraint);
+        void removeConstraint(btTypedConstraint* constraint);
 
         // Carrying a dynamic object: each physics step it is steered towards the hold target.
         void holdObject(const std::shared_ptr<Object>& object);

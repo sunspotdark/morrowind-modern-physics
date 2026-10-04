@@ -787,6 +787,20 @@ namespace MWClass
 
         if (!wasDead && getCreatureStats(ptr).isDead())
         {
+            // The killing blow throws the body (its ragdoll) away from the attacker, harder for heavier blows,
+            // within reason.
+            if (!attacker.isEmpty() && hasHealthDamage)
+            {
+                osg::Vec3f away
+                    = ptr.getRefData().getPosition().asVec3() - attacker.getRefData().getPosition().asVec3();
+                away.z() = 0;
+                if (away.normalize() > 0)
+                {
+                    away.z() = 0.3f;
+                    stats.setDeathKick(away * std::clamp(100.f + healthDamage * 5.f, 100.f, 320.f));
+                }
+            }
+
             // NPC was killed
             if (!attacker.isEmpty() && attacker.getClass().isNpc()
                 && attacker.getClass().getNpcStats(attacker).isWerewolf())

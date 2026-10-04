@@ -7,8 +7,12 @@
 #include <map>
 #include <set>
 #include <span>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+#include <osg/Matrixf>
 
 #include <components/misc/rng.hpp>
 #include <components/vfs/pathutil.hpp>
@@ -302,6 +306,17 @@ namespace MWBase
         virtual void rotateGrabbedObject(float yaw, float pitch) = 0;
         /// Stops the player's weapon/spell use (e.g. so clicking to throw doesn't also attack).
         virtual void setPlayerAttackSuppressed(bool suppressed) = 0;
+
+        /// Ragdolls for dead actors: bones are the starting world matrices of the bones it needs (the standard
+        /// skeleton), kick how the killing blow throws the body. @return false if it can't be made.
+        virtual bool createRagdoll(const MWWorld::Ptr& actor,
+            const std::map<std::string, osg::Matrixf, std::less<>>& bones, const osg::Vec3f& kick)
+            = 0;
+        /// The ragdoll's bones (world matrices, parents first); empty if it has none.
+        virtual std::vector<std::pair<std::string, osg::Matrixf>> getRagdollBonePoses(
+            const MWWorld::ConstPtr& actor) const
+            = 0;
+        virtual void removeRagdoll(const MWWorld::ConstPtr& actor) = 0;
 
         /// A simulated object fell into water here, going down at speed: ripples, and a splash if fast.
         virtual void objectEnteredWater(const osg::Vec3f& position, float speed) = 0;

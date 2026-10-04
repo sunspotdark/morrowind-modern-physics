@@ -1406,6 +1406,22 @@ namespace MWWorld
         return mPhysics->isHoldingObject();
     }
 
+    bool World::createRagdoll(
+        const MWWorld::Ptr& actor, const std::map<std::string, osg::Matrixf, std::less<>>& bones, const osg::Vec3f& kick)
+    {
+        return mPhysics->createRagdoll(actor, bones, kick);
+    }
+
+    std::vector<std::pair<std::string, osg::Matrixf>> World::getRagdollBonePoses(const MWWorld::ConstPtr& actor) const
+    {
+        return mPhysics->getRagdollBonePoses(actor);
+    }
+
+    void World::removeRagdoll(const MWWorld::ConstPtr& actor)
+    {
+        mPhysics->removeRagdoll(actor);
+    }
+
     void World::objectEnteredWater(const osg::Vec3f& position, float speed)
     {
         mRendering->emitWaterRipple(position);

@@ -14,6 +14,7 @@
 #include <variant>
 
 #include <osg/BoundingBox>
+#include <osg/Matrixf>
 #include <osg/Quat>
 #include <osg/Timer>
 #include <osg/ref_ptr>
@@ -70,6 +71,7 @@ namespace MWPhysics
     class Actor;
     class PhysicsTaskScheduler;
     class Projectile;
+    class Ragdoll;
     enum ScriptedCollisionType : char;
 
     using ActorMap = std::unordered_map<const MWWorld::LiveCellRefBase*, std::shared_ptr<Actor>>;
@@ -191,6 +193,16 @@ namespace MWPhysics
         void addDynamicObject(
             const MWWorld::Ptr& ptr, VFS::Path::NormalizedView mesh, osg::Quat rotation, float mass, bool metal,
             bool projectile);
+
+        /// Turn a dead actor's body into a ragdoll: bones are the starting world matrices of
+        /// Ragdoll::getRequiredBones(), kick how the killing blow throws it (on top of how it was moving).
+        /// @return false if it can't be (missing bones)
+        bool createRagdoll(const MWWorld::Ptr& actor, const std::map<std::string, osg::Matrixf, std::less<>>& bones,
+            const osg::Vec3f& kick);
+        /// The simulated bones of the actor's ragdoll (world matrices, parents first); empty without one.
+        std::vector<std::pair<std::string, osg::Matrixf>> getRagdollBonePoses(const MWWorld::ConstPtr& actor) const;
+        void removeRagdoll(const MWWorld::ConstPtr& actor);
+        bool hasRagdoll(const MWWorld::ConstPtr& actor) const;
 
         /// A simulated object was just created in the world (dropped, spawned): settle it onto the surface and
         /// let it fall. Objects loaded with a cell stay asleep where they were.
@@ -386,6 +398,7 @@ namespace MWPhysics
         ObjectMap mObjects;
 
         std::vector<std::shared_ptr<Object>> mDynamicObjects; // subset of mObjects
+        std::unordered_map<const MWWorld::LiveCellRefBase*, std::unique_ptr<Ragdoll>> mRagdolls;
         bool mMovingDynamicObjects = false;
         float mHoldDistance = 0;
         btQuaternion mHoldRelativeRotation;

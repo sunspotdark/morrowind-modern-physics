@@ -68,6 +68,7 @@
 #include "mtphysics.hpp"
 #include "object.hpp"
 #include "projectile.hpp"
+#include "ragdoll.hpp"
 
 namespace
 {
@@ -308,6 +309,7 @@ namespace MWPhysics
 
         mTaskScheduler->releaseSharedStates();
         mHeightFields.clear();
+        mRagdolls.clear();
         mDynamicObjects.clear();
         mObjects.clear();
         mActors.clear();
@@ -685,6 +687,45 @@ namespace MWPhysics
         mDynamicObjects.push_back(std::move(obj));
     }
 
+    bool PhysicsSystem::createRagdoll(
+        const MWWorld::Ptr& actor, const std::map<std::string, osg::Matrixf, std::less<>>& bones, const osg::Vec3f& kick)
+    {
+        for (const std::string& bone : Ragdoll::getRequiredBones())
+            if (bones.find(bone) == bones.end())
+                return false;
+        // Falling as it was moving.
+        osg::Vec3f velocity;
+        if (const auto found = mActors.find(actor.mRef); found != mActors.end())
+        {
+            velocity = (found->second->getPosition() - found->second->getPreviousPosition()) / mPhysicsDt;
+            constexpr float maxSpeed = 600.f;
+            if (velocity.length2() > maxSpeed * maxSpeed)
+                velocity *= maxSpeed / velocity.length();
+        }
+        mRagdolls.erase(actor.mRef);
+        mRagdolls.emplace(actor.mRef, std::make_unique<Ragdoll>(actor, bones, velocity, kick, mTaskScheduler.get()));
+        return true;
+    }
+
+    std::vector<std::pair<std::string, osg::Matrixf>> PhysicsSystem::getRagdollBonePoses(
+        const MWWorld::ConstPtr& actor) const
+    {
+        const auto found = mRagdolls.find(actor.mRef);
+        if (found == mRagdolls.end())
+            return {};
+        return found->second->getBonePoses();
+    }
+
+    void PhysicsSystem::removeRagdoll(const MWWorld::ConstPtr& actor)
+    {
+        mRagdolls.erase(actor.mRef);
+    }
+
+    bool PhysicsSystem::hasRagdoll(const MWWorld::ConstPtr& actor) const
+    {
+        return mRagdolls.find(actor.mRef) != mRagdolls.end();
+    }
+
     void PhysicsSystem::wakeNewObject(const MWWorld::Ptr& ptr)
     {
         const auto found = mObjects.find(ptr.mRef);
@@ -966,6 +1007,7 @@ namespace MWPhysics
         else if (auto foundActor = mActors.find(ptr.mRef); foundActor != mActors.end())
         {
             mActors.erase(foundActor);
+            mRagdolls.erase(ptr.mRef);
         }
     }
 
@@ -982,6 +1024,8 @@ namespace MWPhysics
             foundObject->second->updatePtr(updated);
         else if (auto foundActor = mActors.find(old.mRef); foundActor != mActors.end())
             foundActor->second->updatePtr(updated);
+        if (auto foundRagdoll = mRagdolls.find(old.mRef); foundRagdoll != mRagdolls.end())
+            foundRagdoll->second->updatePtr(updated);
 
         for (auto& [_, actor] : mActors)
         {

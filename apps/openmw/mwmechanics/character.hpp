@@ -163,6 +163,8 @@ namespace MWMechanics
         std::string mCurrentHit;
 
         UpperBodyState mUpperBodyState{ UpperBodyState::None };
+        bool mRagdoll = false; // the body is a ragdoll, which drives the bones
+        bool mDying = false; // in kill()
         bool mResetIdleOnAttackEnd{ false };
 
         JumpingState mJumpState{ JumpState_None };
@@ -232,6 +234,8 @@ namespace MWMechanics
         void updateMagicEffects() const;
 
         void playDeath(float startpoint, CharacterState death);
+        bool startRagdoll();
+        void driveRagdoll();
         CharacterState chooseRandomDeathState() const;
         void playRandomDeath(float startpoint = 0.0f);
 
