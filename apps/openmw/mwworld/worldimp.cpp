@@ -1949,8 +1949,8 @@ namespace MWWorld
     {
         try
         {
-            // inform the GUI about focused object
-            MWWorld::Ptr object = getFocusObject();
+            // inform the GUI about focused object (none while carrying something: that would be what is carried)
+            MWWorld::Ptr object = mPhysics->isHoldingObject() ? MWWorld::Ptr() : getFocusObject();
 
             // retrieve the object's top point's screen position so we know where to place the floating label
             if (!object.isEmpty())
