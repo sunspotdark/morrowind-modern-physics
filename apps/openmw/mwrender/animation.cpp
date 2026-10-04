@@ -19,7 +19,6 @@
 
 #include <components/debug/debuglog.hpp>
 #include <components/misc/strings/lower.hpp>
-#include <components/sceneutil/morphgeometry.hpp>
 #include <components/sceneutil/riggeometry.hpp>
 
 #include <components/resource/animblendrulesmanager.hpp>
@@ -1121,28 +1120,28 @@ namespace MWRender
 
     std::vector<Animation::RigidPiece> Animation::getRigidPieces() const
     {
-        // Only a model of nothing but rigid pieces comes apart. One that bends any of its meshes (a kwama forager
-        // curling up, a skinned wire between a centurion's parts) would tear or stretch them.
-        class FindBendingMeshes : public osg::NodeVisitor
+        // Only a model of nothing but rigid pieces comes apart: a skinned mesh (the wire between a centurion
+        // spider's parts) would stretch between them. (Meshes that change shape in place, like a shalk's, stay on
+        // their piece; one that is the whole body, like a kwama forager's, is just one piece.)
+        class FindSkins : public osg::NodeVisitor
         {
         public:
-            FindBendingMeshes()
+            FindSkins()
                 : osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
             {
             }
             void apply(osg::Drawable& drawable) override
             {
-                if (dynamic_cast<SceneUtil::MorphGeometry*>(&drawable) != nullptr
-                    || dynamic_cast<SceneUtil::RigGeometry*>(&drawable) != nullptr)
+                if (dynamic_cast<SceneUtil::RigGeometry*>(&drawable) != nullptr)
                     mFound = true;
             }
             bool mFound = false;
         };
         if (mObjectRoot == nullptr)
             return {};
-        FindBendingMeshes bending;
-        mObjectRoot->accept(bending);
-        if (bending.mFound)
+        FindSkins skins;
+        mObjectRoot->accept(skins);
+        if (skins.mFound)
             return {};
 
         std::set<const osg::Node*> nodes;

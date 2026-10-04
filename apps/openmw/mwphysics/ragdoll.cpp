@@ -353,6 +353,25 @@ namespace MWPhysics
             std::erase_if(chosen, [&](size_t i) { return size(i) < cutoff; });
             chosen.resize(std::min(chosen.size(), maxParts));
         }
+        // A small piece with no loose piece above it would have nothing to go along with (it would hang in the
+        // air where the body was): it comes loose too, taking any small ones below it along.
+        std::vector<bool> loose(pieces.size(), false);
+        for (size_t i : chosen)
+            loose[i] = true;
+        for (size_t i = 0; i < pieces.size(); ++i)
+        {
+            if (loose[i])
+                continue;
+            bool carried = false;
+            for (int parent = pieces[i].mParent; parent >= 0 && !carried; parent = pieces[parent].mParent)
+                carried = loose[parent];
+            if (!carried)
+                loose[i] = true;
+        }
+        chosen.clear();
+        for (size_t i = 0; i < pieces.size(); ++i)
+            if (loose[i])
+                chosen.push_back(i);
         if (chosen.size() < 2)
             return nullptr;
 

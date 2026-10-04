@@ -1434,17 +1434,21 @@ namespace MWWorld
         if (animation == nullptr)
             return false;
 
-        // People's skeleton (also skeletons, dremora...): the hand-made body.
-        std::map<std::string, osg::Matrixf, std::less<>> bones;
-        for (const std::string& bone : MWPhysics::Ragdoll::getRequiredBones())
+        // People, and things built like people (skeletons, dremora...): the hand-made body. Many four-legged
+        // beasts (guars, rats, wolves...) have bones of the same names, but they aren't shaped like people.
+        if (actor.getClass().isBipedal(actor))
         {
-            const std::optional<osg::Matrixf> world = animation->getBoneWorldMatrix(bone);
-            if (!world)
-                break;
-            bones.emplace(bone, *world);
+            std::map<std::string, osg::Matrixf, std::less<>> bones;
+            for (const std::string& bone : MWPhysics::Ragdoll::getRequiredBones())
+            {
+                const std::optional<osg::Matrixf> world = animation->getBoneWorldMatrix(bone);
+                if (!world)
+                    break;
+                bones.emplace(bone, *world);
+            }
+            if (bones.size() == MWPhysics::Ragdoll::getRequiredBones().size())
+                return mPhysics->createRagdoll(actor, bones, kick);
         }
-        if (bones.size() == MWPhysics::Ragdoll::getRequiredBones().size())
-            return mPhysics->createRagdoll(actor, bones, kick);
 
         // Any other skinned body: parts fitted to the mesh.
         std::vector<MWPhysics::Ragdoll::SkinnedBone> skinned;
