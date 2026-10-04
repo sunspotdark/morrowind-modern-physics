@@ -1443,6 +1443,9 @@ namespace MWWorld
         const MWRender::Animation* animation = mRendering->getAnimation(actor);
         if (animation == nullptr)
             return false;
+        // A creature whose ragdoll came apart before (see doPhysics) is moved about in one piece.
+        if (mFailedRagdollModels.count(std::string(actor.getClass().getModel(actor).value())) != 0)
+            return allowOnePiece && mPhysics->createCorpseBody(actor);
 
         // People, and things built like people (skeletons, dremora...): the hand-made body. Many four-legged
         // beasts (guars, rats, wolves...) have bones of the same names, but they aren't shaped like people.
@@ -1625,6 +1628,15 @@ namespace MWWorld
         mPhysics->stepSimulation(duration, mDiscardMovements, frameStart, frameNumber, stats);
         mProjectileManager->processHits();
         mDiscardMovements = false;
+        for (const MWWorld::Ptr& body : mPhysics->removeFailedRagdolls(duration))
+        {
+            // It lies in its death pose instead (see CharacterController::driveRagdoll). A creature's model is
+            // left out from then on; people all share one, so only this body is.
+            Log(Debug::Warning) << "Ragdoll of " << body.getCellRef().getRefId() << " came apart; dropped it";
+            body.getClass().getCreatureStats(body).setRagdollPose({});
+            if (!body.getClass().isNpc())
+                mFailedRagdollModels.insert(std::string(body.getClass().getModel(body).value()));
+        }
         for (const MWWorld::Ptr& body : mPhysics->moveActors())
         {
             // Its bones were set in the world before it moved; put them back there (or they'd move with it).

@@ -2892,8 +2892,12 @@ namespace MWMechanics
             = MWBase::Environment::get().getWorld()->getRagdollBonePoses(mPtr);
         if (poses.empty())
         {
-            // Gone (unloaded with its cell); it comes back in its death pose.
-            mRagdoll = false;
+            // Gone while the body is still here (it came apart; see World::doPhysics): back to its death pose.
+            if (mRagdoll)
+            {
+                mRagdoll = false;
+                mCurrentDeath.clear();
+            }
             return;
         }
         if (!mRagdoll)

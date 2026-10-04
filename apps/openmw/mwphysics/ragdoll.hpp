@@ -99,6 +99,12 @@ namespace MWPhysics
         /// For a single body: the point on it nearest to eye, where it is grabbed. Otherwise none.
         std::optional<osg::Vec3f> getGrabPoint(const osg::Vec3f& eye) const;
 
+        /// Whether it has come apart (a model the parts don't suit: parts flying off, joints torn), checked over
+        /// its first seconds; duration is the time since the last check.
+        bool hasComeApart(float duration);
+
+        MWWorld::Ptr getPtr() const;
+
         /// What getBonePoses gave last (so the rest of the frame agrees with what the bones were set to).
         const std::vector<std::pair<std::string, osg::Matrixf>>& getLastBonePoses() const { return mLastPoses; }
 
@@ -120,6 +126,12 @@ namespace MWPhysics
         mutable std::vector<std::pair<std::string, osg::Matrixf>> mLastPoses;
         std::unique_ptr<btActionInterface> mJointFriction;
         std::optional<osg::Vec2f> mActorOffset; // from the main part to the actor, along the ground
+        // For hasComeApart: how long it has been checked, how far each part started from the main one, and where
+        // each part was at the last check.
+        float mAge = 0;
+        float mCheckTimer = 0;
+        std::vector<float> mStartDistances;
+        std::vector<btVector3> mLastPositions;
 
         PhysicsTaskScheduler* mTaskScheduler;
         std::vector<std::shared_ptr<Part>> mParts; // shared: a part can be held (see PhysicsTaskScheduler)

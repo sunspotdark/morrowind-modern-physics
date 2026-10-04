@@ -503,6 +503,56 @@ namespace MWPhysics
         return osg::Vec3f(main.x() + mActorOffset->x(), main.y() + mActorOffset->y(), main.z());
     }
 
+    MWWorld::Ptr Ragdoll::getPtr() const
+    {
+        return mParts.front()->getPtr();
+    }
+
+    bool Ragdoll::hasComeApart(float duration)
+    {
+        // A bad fit shows straight away; after a few seconds it's settled (or being dragged around).
+        constexpr float checkTime = 3.f;
+        if (mAge > checkTime || mParts.empty())
+            return false;
+        mAge += duration;
+        mCheckTimer += duration;
+
+        std::vector<btVector3> positions;
+        positions.reserve(mParts.size());
+        for (const auto& part : mParts)
+        {
+            btTransform transform;
+            part->mMotionState->getWorldTransform(transform);
+            positions.push_back(transform.getOrigin());
+        }
+        if (mLastPositions.empty())
+        {
+            for (const btVector3& position : positions)
+                mStartDistances.push_back(static_cast<float>((position - positions.front()).length()));
+            mLastPositions = std::move(positions);
+            mCheckTimer = 0;
+            return false;
+        }
+        // Over a while, not every frame: the parts only move each physics step.
+        constexpr float checkInterval = 0.25f;
+        if (mCheckTimer < checkInterval)
+            return false;
+
+        // Faster than anything falls or is thrown, or a joint pulled far apart.
+        constexpr float maxSpeed = 2500.f;
+        for (size_t i = 0; i < positions.size(); ++i)
+        {
+            if ((positions[i] - mLastPositions[i]).length() > maxSpeed * mCheckTimer)
+                return true;
+            if (isJointed()
+                && (positions[i] - positions.front()).length() > mStartDistances[i] * 2.f + 80.f)
+                return true;
+        }
+        mLastPositions = std::move(positions);
+        mCheckTimer = 0;
+        return false;
+    }
+
     void Ragdoll::setAtRest()
     {
         for (const auto& part : mParts)

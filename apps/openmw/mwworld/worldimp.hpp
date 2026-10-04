@@ -2,6 +2,8 @@
 #define GAME_MWWORLD_WORLDIMP_H
 
 #include <memory>
+#include <set>
+#include <string>
 
 #include <osg/Timer>
 #include <osg/ref_ptr>
@@ -116,6 +118,7 @@ namespace MWWorld
         bool mScriptsEnabled;
         bool mDiscardMovements;
         bool mPlayerAttackSuppressed = false;
+        std::set<std::string> mFailedRagdollModels; // creatures whose ragdolls came apart (see doPhysics)
         std::vector<std::string> mContentFiles;
 
         std::filesystem::path mUserDataPath;

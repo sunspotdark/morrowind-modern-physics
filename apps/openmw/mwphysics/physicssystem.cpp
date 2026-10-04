@@ -715,6 +715,22 @@ namespace MWPhysics
         return true;
     }
 
+    std::vector<MWWorld::Ptr> PhysicsSystem::removeFailedRagdolls(float duration)
+    {
+        std::vector<MWWorld::Ptr> failed;
+        for (auto it = mRagdolls.begin(); it != mRagdolls.end();)
+        {
+            if (it->second->hasComeApart(duration))
+            {
+                failed.push_back(it->second->getPtr());
+                it = mRagdolls.erase(it);
+            }
+            else
+                ++it;
+        }
+        return failed;
+    }
+
     void PhysicsSystem::settleRagdoll(const MWWorld::ConstPtr& actor)
     {
         if (const auto found = mRagdolls.find(actor.mRef); found != mRagdolls.end())
