@@ -702,19 +702,36 @@ namespace MWPhysics
             return;
         Object& object = *found->second;
 
-        // Put the tip (the far end along the object's Y axis, which points where it flew) a fifth of the
-        // object's length past the hit point, whatever the model's origin is.
+        // Its tip a fifth of its length past the hit point. Exactly there (no placing on surfaces: it's meant to
+        // be embedded), and fixed until taken or grabbed.
         const auto [back, tip] = object.getDynamicShapeYRange();
-        const float depth = std::clamp((tip - back) * 0.2f, 4.f, 12.f);
-        const btQuaternion rotation = object.getTransform().getRotation();
-        const osg::Vec3f forward = Misc::Convert::toOsg(btMatrix3x3(rotation) * btVector3(0, 1, 0));
-        const osg::Vec3f origin = hitPoint + forward * depth - forward * tip;
-        MWBase::Environment::get().getWorld()->moveObject(ptr, origin, false, false);
-
-        // Exactly there (no placing on surfaces: it's meant to be embedded), and fixed until taken or grabbed.
-        object.updatePosition();
+        placeTipAt(object, hitPoint, std::clamp((tip - back) * 0.2f, 4.f, 12.f));
         object.requestStuck(true);
         mTaskScheduler->updateSingleAabb(found->second);
+    }
+
+    void PhysicsSystem::deflectObject(const MWWorld::Ptr& ptr, const osg::Vec3f& hitPoint, const osg::Vec3f& velocity)
+    {
+        const auto found = mObjects.find(ptr.mRef);
+        if (found == mObjects.end() || !found->second->isDynamic())
+            return;
+        // Its tip just short of the hit point, so it doesn't start inside what it glanced off, then away.
+        placeTipAt(*found->second, hitPoint, -2.f);
+        found->second->requestVelocity(velocity);
+        found->second->requestWake();
+        mTaskScheduler->updateSingleAabb(found->second);
+    }
+
+    void PhysicsSystem::placeTipAt(Object& object, const osg::Vec3f& point, float depth)
+    {
+        // The tip is the far end along the object's Y axis, which points where it flew; the model's origin may be
+        // anywhere along it.
+        const float tip = object.getDynamicShapeYRange().second;
+        const btQuaternion rotation = object.getTransform().getRotation();
+        const osg::Vec3f forward = Misc::Convert::toOsg(btMatrix3x3(rotation) * btVector3(0, 1, 0));
+        const osg::Vec3f origin = point + forward * depth - forward * tip;
+        MWBase::Environment::get().getWorld()->moveObject(object.getPtr(), origin, false, false);
+        object.updatePosition();
     }
 
     void PhysicsSystem::launchObject(const MWWorld::Ptr& ptr, const osg::Vec3f& velocity)

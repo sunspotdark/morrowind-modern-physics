@@ -752,7 +752,7 @@ namespace MWWorld
         {
             // Glance off what it hit, losing most of its speed.
             const osg::Vec3f reflected = state.mVelocity - hitNormal * (2.f * (state.mVelocity * hitNormal));
-            mPhysics->launchObject(placed, reflected * 0.25f);
+            mPhysics->deflectObject(placed, hitPosition, reflected * 0.25f);
         }
     }
 

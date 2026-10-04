@@ -197,6 +197,9 @@ namespace MWPhysics
         void wakeNewObject(const MWWorld::Ptr& ptr);
         /// Fix a simulated object, asleep, with its tip driven into hitPoint (an arrow stuck in a wall).
         void stickObject(const MWWorld::Ptr& ptr, const osg::Vec3f& hitPoint);
+        /// Send a simulated object (a projectile that glanced off something at hitPoint) away at velocity, its tip
+        /// starting just short of the hit point.
+        void deflectObject(const MWWorld::Ptr& ptr, const osg::Vec3f& hitPoint, const osg::Vec3f& velocity);
         /// Set a simulated object moving.
         void launchObject(const MWWorld::Ptr& ptr, const osg::Vec3f& velocity);
 
@@ -353,6 +356,8 @@ namespace MWPhysics
 
         void moveDynamicObjects();
         void placeOnSurface(Object& object);
+        /// Move an object so the far end along its Y axis is depth past point, along that axis.
+        void placeTipAt(Object& object, const osg::Vec3f& point, float depth);
         /// Simplified convex hull of a mesh's collision geometry, computed once per mesh.
         const std::vector<btVector3>& getHullPoints(VFS::Path::NormalizedView mesh, const Resource::BulletShape& shape);
 
