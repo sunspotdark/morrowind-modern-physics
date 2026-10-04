@@ -586,7 +586,6 @@ namespace MWClass
             MWBase::Environment::get().getWorld()->knockObjectsWithMeleeAttack(ptr, weapon, type, attackStrength);
             return;
         }
-            return;
 
         const MWWorld::Class& othercls = victim.getClass();
         MWMechanics::CreatureStats& otherstats = othercls.getCreatureStats(victim);
