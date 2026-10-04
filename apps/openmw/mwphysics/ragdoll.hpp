@@ -59,7 +59,27 @@ namespace MWPhysics
         static std::unique_ptr<Ragdoll> fromSkeleton(const MWWorld::Ptr& actor, const std::vector<SkinnedBone>& bones,
             const osg::Vec3f& velocity, const osg::Vec3f& kick, PhysicsTaskScheduler* scheduler);
 
+        /// A node of a model built of rigid pieces, and the bounds (in its own space) of the pieces it carries.
+        struct RigidPiece
+        {
+            std::string mName;
+            int mParent; // index of the closest such ancestor, -1 for none
+            osg::Matrixf mWorld;
+            osg::Vec3f mMin;
+            osg::Vec3f mMax;
+        };
+
+        /// A body built of rigid pieces falls apart: each (big enough) piece is a loose object of its own; the
+        /// smaller ones stay on the piece above them. Pieces are parents first.
+        /// @return null if it would hardly fall apart
+        static std::unique_ptr<Ragdoll> fromRigidPieces(const MWWorld::Ptr& actor,
+            const std::vector<RigidPiece>& pieces, const osg::Vec3f& velocity, const osg::Vec3f& kick,
+            PhysicsTaskScheduler* scheduler);
+
         ~Ragdoll();
+
+        /// Whether the parts are joined together (otherwise they're loose pieces).
+        bool isJointed() const { return !mJoints.empty(); }
 
         /// Where the simulated bones are now (world matrices), parents first. Interpolation is how far the time
         /// since the last physics step is to the next one, for smooth movement at any frame rate.

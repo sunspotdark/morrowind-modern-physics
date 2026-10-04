@@ -205,7 +205,10 @@ namespace MWPhysics
         /// For any skinned body (see Ragdoll::fromSkeleton). @return false if it can't be made.
         bool createSkinnedRagdoll(
             const MWWorld::Ptr& actor, const std::vector<Ragdoll::SkinnedBone>& bones, const osg::Vec3f& kick);
-        /// A dead actor without a skinned body, as one body that its model follows.
+        /// For a body built of rigid pieces (see Ragdoll::fromRigidPieces). @return false if it can't be made.
+        bool createRigidPieceRagdoll(
+            const MWWorld::Ptr& actor, const std::vector<Ragdoll::RigidPiece>& pieces, const osg::Vec3f& kick);
+        /// A dead actor in one piece, which its model follows.
         bool createCorpseBody(const MWWorld::Ptr& actor);
         void removeRagdoll(const MWWorld::ConstPtr& actor);
         bool hasRagdoll(const MWWorld::ConstPtr& actor) const;
@@ -410,6 +413,8 @@ namespace MWPhysics
         float mHoldDistance = 0;
         btQuaternion mHoldRelativeRotation;
         bool mHoldingRagdoll = false;
+
+        osg::Vec3f getDeathVelocity(const MWWorld::ConstPtr& actor) const;
         std::unordered_map<std::string, std::vector<btVector3>> mHullCache;
         std::set<std::string, std::less<>> mWarnedNoShape;
 

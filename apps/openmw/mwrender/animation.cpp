@@ -1,6 +1,7 @@
 #include "animation.hpp"
 
 #include <algorithm>
+#include <set>
 #include <limits>
 
 #include <osg/BlendFunc>
@@ -18,6 +19,7 @@
 
 #include <components/debug/debuglog.hpp>
 #include <components/misc/strings/lower.hpp>
+#include <components/sceneutil/morphgeometry.hpp>
 #include <components/sceneutil/riggeometry.hpp>
 
 #include <components/resource/animblendrulesmanager.hpp>
@@ -1082,6 +1084,120 @@ namespace MWRender
     {
         mStates.clear();
         resetActiveGroups();
+    }
+
+    namespace
+    {
+        // Adds the bounds of the meshes under node (in the space matrix takes them to), not going into stopAt.
+        void collectMeshBounds(const osg::Node& node, const osg::Matrixf& matrix,
+            const std::set<const osg::Node*>* stopAt, osg::BoundingBox& box)
+        {
+            if (node.getNodeMask() == 0 || (stopAt != nullptr && stopAt->count(&node) != 0))
+                return;
+            if (const osg::Drawable* drawable = node.asDrawable())
+            {
+                // Particles (smoke, sparks...) aren't part of the body.
+                if (dynamic_cast<const osgParticle::ParticleSystem*>(drawable) != nullptr)
+                    return;
+                const osg::BoundingBox& bounds = drawable->getBoundingBox();
+                if (!bounds.valid())
+                    return;
+                for (unsigned int i = 0; i < 8; ++i)
+                    box.expandBy(bounds.corner(i) * matrix);
+                return;
+            }
+            osg::Matrixf toSpace = matrix;
+            if (const osg::Transform* transform = node.asTransform())
+            {
+                osg::Matrix local;
+                transform->computeLocalToWorldMatrix(local, nullptr);
+                toSpace = osg::Matrixf(local) * matrix;
+            }
+            if (const osg::Group* group = node.asGroup())
+                for (unsigned int i = 0; i < group->getNumChildren(); ++i)
+                    collectMeshBounds(*group->getChild(i), toSpace, stopAt, box);
+        }
+    }
+
+    std::vector<Animation::RigidPiece> Animation::getRigidPieces() const
+    {
+        // Only a model of nothing but rigid pieces comes apart. One that bends any of its meshes (a kwama forager
+        // curling up, a skinned wire between a centurion's parts) would tear or stretch them.
+        class FindBendingMeshes : public osg::NodeVisitor
+        {
+        public:
+            FindBendingMeshes()
+                : osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
+            {
+            }
+            void apply(osg::Drawable& drawable) override
+            {
+                if (dynamic_cast<SceneUtil::MorphGeometry*>(&drawable) != nullptr
+                    || dynamic_cast<SceneUtil::RigGeometry*>(&drawable) != nullptr)
+                    mFound = true;
+            }
+            bool mFound = false;
+        };
+        if (mObjectRoot == nullptr)
+            return {};
+        FindBendingMeshes bending;
+        mObjectRoot->accept(bending);
+        if (bending.mFound)
+            return {};
+
+        std::set<const osg::Node*> nodes;
+        for (const auto& [name, node] : getNodeMap())
+            nodes.insert(node.get());
+
+        // Each node's own pieces: what is under it, up to the next node.
+        std::map<const osg::Node*, std::pair<std::string, osg::BoundingBox>> pieces;
+        for (const auto& [name, node] : getNodeMap())
+        {
+            if (node->getNodeMask() == 0)
+                continue;
+            osg::BoundingBox bounds;
+            for (unsigned int i = 0; i < node->getNumChildren(); ++i)
+                collectMeshBounds(*node->getChild(i), osg::Matrixf(), &nodes, bounds);
+            if (bounds.valid())
+                pieces.emplace(node.get(), std::make_pair(name, bounds));
+        }
+
+        // Parents first: by depth in the scene graph.
+        struct Entry
+        {
+            const osg::Node* mNode;
+            const osg::Node* mParent;
+            int mDepth;
+        };
+        std::vector<Entry> entries;
+        for (const auto& [node, piece] : pieces)
+        {
+            Entry entry{ node, nullptr, 0 };
+            for (const osg::Node* up = node; up->getNumParents() > 0;)
+            {
+                up = up->getParent(0);
+                ++entry.mDepth;
+                if (entry.mParent == nullptr && pieces.count(up) != 0)
+                    entry.mParent = up;
+            }
+            entries.push_back(entry);
+        }
+        std::stable_sort(
+            entries.begin(), entries.end(), [](const Entry& a, const Entry& b) { return a.mDepth < b.mDepth; });
+
+        std::vector<RigidPiece> result;
+        std::map<const osg::Node*, int> indices;
+        for (const Entry& entry : entries)
+        {
+            const auto& [name, bounds] = pieces[entry.mNode];
+            const std::optional<osg::Matrixf> world = getBoneWorldMatrix(name);
+            if (!world)
+                continue;
+            const auto parent = indices.find(entry.mParent);
+            indices.emplace(entry.mNode, static_cast<int>(result.size()));
+            result.push_back({ name, parent != indices.end() ? parent->second : -1, *world, bounds });
+        }
+        return result;
     }
 
     std::vector<Animation::SkinnedBone> Animation::getSkinnedBones() const

@@ -331,6 +331,75 @@ namespace MWPhysics
         return ragdoll;
     }
 
+    std::unique_ptr<Ragdoll> Ragdoll::fromRigidPieces(const MWWorld::Ptr& actor, const std::vector<RigidPiece>& pieces,
+        const osg::Vec3f& velocity, const osg::Vec3f& kick, PhysicsTaskScheduler* scheduler)
+    {
+        // The bigger pieces come loose (legs, shell, head...), at most a handful; the rest stay on them.
+        const auto size = [&](size_t i) { return (pieces[i].mMax - pieces[i].mMin).length() * 0.5f; };
+        float largest = 0;
+        for (size_t i = 0; i < pieces.size(); ++i)
+            largest = std::max(largest, size(i));
+        std::vector<size_t> chosen;
+        for (size_t i = 0; i < pieces.size(); ++i)
+            if (size(i) >= largest * 0.12f && size(i) > 1.f)
+                chosen.push_back(i);
+        constexpr size_t maxParts = 16;
+        if (chosen.size() > maxParts)
+        {
+            std::vector<size_t> bySize = chosen;
+            std::nth_element(bySize.begin(), bySize.begin() + maxParts - 1, bySize.end(),
+                [&](size_t a, size_t b) { return size(a) > size(b); });
+            const float cutoff = size(bySize[maxParts - 1]);
+            std::erase_if(chosen, [&](size_t i) { return size(i) < cutoff; });
+            chosen.resize(std::min(chosen.size(), maxParts));
+        }
+        if (chosen.size() < 2)
+            return nullptr;
+
+        std::unique_ptr<Ragdoll> ragdoll(new Ragdoll(scheduler));
+        osg::Vec3f middle;
+        std::vector<btTransform> bodies;
+        for (size_t i : chosen)
+        {
+            const RigidPiece& piece = pieces[i];
+            auto part = std::make_shared<Part>(actor);
+            part->mBone = piece.mName;
+            const btTransform nodeWorld = withoutScale(piece.mWorld, part->mBoneScale);
+            const osg::Vec3f scale = part->mBoneScale;
+            const osg::Vec3f center = (piece.mMin + piece.mMax) * 0.5f;
+            osg::Vec3f half = (piece.mMax - piece.mMin) * 0.5f;
+            half = osg::Vec3f(std::max(half.x() * scale.x(), 1.f), std::max(half.y() * scale.y(), 1.f),
+                std::max(half.z() * scale.z(), 1.f));
+            part->mBoxHalfExtents = half;
+            part->mShape = std::make_unique<btBoxShape>(Misc::Convert::toBullet(half));
+            const btTransform bodyWorld(nodeWorld.getRotation(),
+                nodeWorld * Misc::Convert::toBullet(osg::Vec3f(
+                    center.x() * scale.x(), center.y() * scale.y(), center.z() * scale.z())));
+            part->mBoneFromBody = bodyWorld.inverse() * nodeWorld;
+            // Shells and limbs: about half as dense as water, a box being roomier than what it holds.
+            const float volume = 8.f * half.x() * half.y() * half.z() / (70.f * 70.f * 70.f);
+            makeBody(*part, bodyWorld, std::clamp(volume * 500.f, 0.2f, 100.f),
+                std::min({ half.x(), half.y(), half.z() }));
+            middle += Misc::Convert::toOsg(bodyWorld.getOrigin());
+            bodies.push_back(bodyWorld);
+            ragdoll->mParts.push_back(std::move(part));
+        }
+        middle /= static_cast<float>(chosen.size());
+
+        // Falling apart: the pieces spread a little from the middle, as the killing blow throws them.
+        for (size_t i = 0; i < ragdoll->mParts.size(); ++i)
+        {
+            osg::Vec3f out = Misc::Convert::toOsg(bodies[i].getOrigin()) - middle;
+            out.z() = 0;
+            if (out.normalize() > 0)
+                out *= 50.f;
+            ragdoll->mParts[i]->mBody->setLinearVelocity(
+                Misc::Convert::toBullet(velocity + kick * 0.7f + out + osg::Vec3f(0, 0, 40)));
+        }
+        ragdoll->addToWorld();
+        return ragdoll;
+    }
+
     Ragdoll::Ragdoll(PhysicsTaskScheduler* scheduler)
         : mTaskScheduler(scheduler)
     {

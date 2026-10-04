@@ -17,6 +17,7 @@
 #include <components/sceneutil/util.hpp>
 #include <components/vfs/pathutil.hpp>
 
+#include <osg/BoundingBox>
 #include <osg/observer_ptr>
 
 #include <deque>
@@ -482,6 +483,17 @@ namespace MWRender
         };
         /// The bones of the skinned meshes, parents first.
         std::vector<SkinnedBone> getSkinnedBones() const;
+
+        /// A node carrying rigid (unskinned) pieces of the model, and their bounds in its own space.
+        struct RigidPiece
+        {
+            std::string mName;
+            int mParent; // index of the closest such ancestor, -1 for none
+            osg::Matrixf mWorld;
+            osg::BoundingBox mBounds;
+        };
+        /// The nodes of a model built of rigid pieces, parents first.
+        std::vector<RigidPiece> getRigidPieces() const;
 
         /// Show a projectile model stuck in the body: it flew along direction (normalized) and hit near hitPosition.
         /// It is attached to the closest bone, so it moves with the body. Visual only; the oldest ones are removed

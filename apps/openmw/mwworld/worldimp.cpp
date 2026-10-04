@@ -1453,6 +1453,14 @@ namespace MWWorld
         if (mPhysics->createSkinnedRagdoll(actor, skinned, kick))
             return true;
 
+        // Built of rigid pieces (scribs, constructs...): it falls apart.
+        std::vector<MWPhysics::Ragdoll::RigidPiece> pieces;
+        for (const MWRender::Animation::RigidPiece& piece : animation->getRigidPieces())
+            pieces.push_back({ piece.mName, piece.mParent, piece.mWorld, piece.mBounds._min, piece.mBounds._max });
+        if (mPhysics->createRigidPieceRagdoll(actor, pieces, kick))
+            return true;
+
+        // Anything else (bending its mesh as a whole, or partly skinned) stays in one piece.
         return allowOnePiece && mPhysics->createCorpseBody(actor);
     }
 

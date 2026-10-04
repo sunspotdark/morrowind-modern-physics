@@ -697,14 +697,7 @@ namespace MWPhysics
             if (bones.find(bone) == bones.end())
                 return false;
         // Falling as it was moving.
-        osg::Vec3f velocity;
-        if (const auto found = mActors.find(actor.mRef); found != mActors.end())
-        {
-            velocity = (found->second->getPosition() - found->second->getPreviousPosition()) / mPhysicsDt;
-            constexpr float maxSpeed = 600.f;
-            if (velocity.length2() > maxSpeed * maxSpeed)
-                velocity *= maxSpeed / velocity.length();
-        }
+        const osg::Vec3f velocity = getDeathVelocity(actor);
         mRagdolls.erase(actor.mRef);
         mRagdolls.emplace(actor.mRef, std::make_unique<Ragdoll>(actor, bones, velocity, kick, mTaskScheduler.get()));
         return true;
@@ -713,20 +706,38 @@ namespace MWPhysics
     bool PhysicsSystem::createSkinnedRagdoll(
         const MWWorld::Ptr& actor, const std::vector<Ragdoll::SkinnedBone>& bones, const osg::Vec3f& kick)
     {
-        osg::Vec3f velocity;
-        if (const auto found = mActors.find(actor.mRef); found != mActors.end())
-        {
-            velocity = (found->second->getPosition() - found->second->getPreviousPosition()) / mPhysicsDt;
-            constexpr float maxSpeed = 600.f;
-            if (velocity.length2() > maxSpeed * maxSpeed)
-                velocity *= maxSpeed / velocity.length();
-        }
+        const osg::Vec3f velocity = getDeathVelocity(actor);
         std::unique_ptr<Ragdoll> ragdoll = Ragdoll::fromSkeleton(actor, bones, velocity, kick, mTaskScheduler.get());
         if (ragdoll == nullptr)
             return false;
         mRagdolls.erase(actor.mRef);
         mRagdolls.emplace(actor.mRef, std::move(ragdoll));
         return true;
+    }
+
+    bool PhysicsSystem::createRigidPieceRagdoll(
+        const MWWorld::Ptr& actor, const std::vector<Ragdoll::RigidPiece>& pieces, const osg::Vec3f& kick)
+    {
+        std::unique_ptr<Ragdoll> ragdoll
+            = Ragdoll::fromRigidPieces(actor, pieces, getDeathVelocity(actor), kick, mTaskScheduler.get());
+        if (ragdoll == nullptr)
+            return false;
+        mRagdolls.erase(actor.mRef);
+        mRagdolls.emplace(actor.mRef, std::move(ragdoll));
+        return true;
+    }
+
+    osg::Vec3f PhysicsSystem::getDeathVelocity(const MWWorld::ConstPtr& actor) const
+    {
+        // Falling as it was moving.
+        const auto found = mActors.find(actor.mRef);
+        if (found == mActors.end())
+            return osg::Vec3f();
+        osg::Vec3f velocity = (found->second->getPosition() - found->second->getPreviousPosition()) / mPhysicsDt;
+        constexpr float maxSpeed = 600.f;
+        if (velocity.length2() > maxSpeed * maxSpeed)
+            velocity *= maxSpeed / velocity.length();
+        return velocity;
     }
 
     bool PhysicsSystem::createCorpseBody(const MWWorld::Ptr& actor)
@@ -865,8 +876,9 @@ namespace MWPhysics
                 return true;
             }
             // Gripped firmly enough to drag the rest of the body along (a heavy beast takes a heavier grip); it
-            // hangs as it likes.
-            const btScalar gripMass = std::clamp(ragdoll->second->getMass() * 0.6f, 30.f, 300.f);
+            // hangs as it likes. A loose piece is just carried.
+            const btScalar gripMass
+                = ragdoll->second->isJointed() ? std::clamp(ragdoll->second->getMass() * 0.6f, 30.f, 300.f) : 0.f;
             mTaskScheduler->holdObject(part, false, gripMass);
             return true;
         }
