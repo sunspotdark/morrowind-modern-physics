@@ -316,6 +316,8 @@ namespace MWBase
         virtual std::vector<std::pair<std::string, osg::Matrixf>> getRagdollBonePoses(
             const MWWorld::ConstPtr& actor) const
             = 0;
+        /// A dead actor without the standard skeleton, as one body that its model follows.
+        virtual bool createCorpseBody(const MWWorld::Ptr& actor) = 0;
         virtual void removeRagdoll(const MWWorld::ConstPtr& actor) = 0;
 
         /// A simulated object fell into water here, going down at speed: ripples, and a splash if fast.

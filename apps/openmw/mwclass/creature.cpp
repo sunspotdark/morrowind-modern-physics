@@ -400,6 +400,8 @@ namespace MWClass
                 ptr.getRefData().getLocals().setVarByInt(script, "onpchitme", 1);
         }
 
+        const bool wasAlive = !stats.isDead();
+
         if (!successful)
         {
             // Missed
@@ -431,6 +433,19 @@ namespace MWClass
                 MWMechanics::DynamicStat<float> magicka(getCreatureStats(ptr).getMagicka());
                 magicka.setCurrent(magicka.getCurrent() - damage);
                 stats.setMagicka(magicka);
+            }
+        }
+
+        // The killing blow throws the body (its ragdoll, for those with one) away from the attacker, as for NPCs.
+        const auto health = damages.find("health");
+        if (wasAlive && stats.isDead() && !attacker.isEmpty() && health != damages.end() && health->second >= 0.001f)
+        {
+            osg::Vec3f away = ptr.getRefData().getPosition().asVec3() - attacker.getRefData().getPosition().asVec3();
+            away.z() = 0;
+            if (away.normalize() > 0)
+            {
+                away.z() = 0.3f;
+                stats.setDeathKick(away * std::clamp(100.f + health->second * 5.f, 100.f, 320.f));
             }
         }
     }

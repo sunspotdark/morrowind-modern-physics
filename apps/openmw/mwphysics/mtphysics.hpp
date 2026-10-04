@@ -16,6 +16,7 @@
 class btDiscreteDynamicsWorld;
 class btRigidBody;
 class btTypedConstraint;
+class btPoint2PointConstraint;
 
 #include <osg/Timer>
 
@@ -78,7 +79,10 @@ namespace MWPhysics
         // Carrying a dynamic object: each physics step it is steered towards the hold target.
         /// steerRotation: also turn it to the target orientation. holdMass: if set, its mass while held (a heavier
         /// grip drags what it is jointed to, e.g. the rest of a ragdoll).
-        void holdObject(const std::shared_ptr<PtrHolder>& object, bool steerRotation, btScalar holdMass);
+        /// grabPoint: if set, it isn't carried but hangs from this world point (pinned there), which then follows
+        /// the hold target.
+        void holdObject(const std::shared_ptr<PtrHolder>& object, bool steerRotation, btScalar holdMass,
+            const std::optional<btVector3>& grabPoint = std::nullopt);
         void setHoldTarget(const btVector3& position, const btQuaternion& rotation);
         /// Let go of the held object, optionally setting its velocity (for throwing).
         void releaseHeldObject(const std::optional<btVector3>& velocity);
@@ -163,6 +167,8 @@ namespace MWPhysics
         std::weak_ptr<PtrHolder> mHeldObject;
         bool mHoldSteerRotation = true;
         btScalar mHeldRestoreMass = 0; // the mass to give back on release, if changed while held
+        std::unique_ptr<btPoint2PointConstraint> mHoldPin; // see holdObject
+        void removeHoldPinUnsafe();
         btVector3 mHoldTarget;
         btQuaternion mHoldTargetRotation;
         // Dynamic objects passing through statics they were wedged in (see freeWedgedObjectUnsafe).

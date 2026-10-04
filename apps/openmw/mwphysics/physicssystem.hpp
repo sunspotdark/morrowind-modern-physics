@@ -201,6 +201,8 @@ namespace MWPhysics
             const osg::Vec3f& kick);
         /// The simulated bones of the actor's ragdoll (world matrices, parents first); empty without one.
         std::vector<std::pair<std::string, osg::Matrixf>> getRagdollBonePoses(const MWWorld::ConstPtr& actor) const;
+        /// A dead actor without the standard skeleton, as one body that its model follows.
+        bool createCorpseBody(const MWWorld::Ptr& actor);
         void removeRagdoll(const MWWorld::ConstPtr& actor);
         bool hasRagdoll(const MWWorld::ConstPtr& actor) const;
 

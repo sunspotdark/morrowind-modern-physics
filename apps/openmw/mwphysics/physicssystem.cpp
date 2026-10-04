@@ -34,6 +34,7 @@
 #include <components/esm3/loadmgef.hpp>
 #include <components/misc/constants.hpp>
 #include <components/misc/convert.hpp>
+#include <components/sceneutil/positionattitudetransform.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <components/misc/strings/conversion.hpp>
 #include <components/resource/bulletshape.hpp>
@@ -707,6 +708,33 @@ namespace MWPhysics
         return true;
     }
 
+    bool PhysicsSystem::createCorpseBody(const MWWorld::Ptr& actor)
+    {
+        const auto found = mActors.find(actor.mRef);
+        const SceneUtil::PositionAttitudeTransform* base = actor.getRefData().getBaseNode();
+        if (found == mActors.end() || base == nullptr)
+            return false;
+        // The standing size, but lower (dead things lie down) and a little narrower (the box is roomier than the
+        // body, and its corners would hold it up off slopes).
+        osg::Vec3f half = found->second->getHalfExtents();
+        half *= 0.8f;
+        half.z() *= 0.75f;
+        half.x() = std::max(half.x(), 4.f);
+        half.y() = std::max(half.y(), 4.f);
+        half.z() = std::max(half.z(), 4.f);
+        const btTransform bodyWorld(Misc::Convert::toBullet(base->getAttitude()),
+            Misc::Convert::toBullet(base->getPosition() + osg::Vec3f(0, 0, half.z())));
+        // About half as dense as water (~70 units to a meter), allowing for the box being roomier than the body.
+        const float volume = 8.f * half.x() * half.y() * half.z() / (70.f * 70.f * 70.f);
+        const float mass = std::clamp(volume * 500.f, 3.f, 400.f);
+        const osg::Matrixf baseWorld = osg::Matrixf::scale(base->getScale())
+            * osg::Matrixf::rotate(base->getAttitude()) * osg::Matrixf::translate(base->getPosition());
+        mRagdolls.erase(actor.mRef);
+        mRagdolls.emplace(
+            actor.mRef, std::make_unique<Ragdoll>(actor, bodyWorld, half, mass, baseWorld, mTaskScheduler.get()));
+        return true;
+    }
+
     std::vector<std::pair<std::string, osg::Matrixf>> PhysicsSystem::getRagdollBonePoses(
         const MWWorld::ConstPtr& actor) const
     {
@@ -809,6 +837,12 @@ namespace MWPhysics
                 return false;
             mHoldDistance = 70.f;
             mHoldingRagdoll = true;
+            // A one-piece body hangs from where it was grabbed (and drags along the ground).
+            if (const std::optional<osg::Vec3f> grabPoint = ragdoll->second->getGrabPoint(eye))
+            {
+                mTaskScheduler->holdObject(part, false, 0, Misc::Convert::toBullet(*grabPoint));
+                return true;
+            }
             // Gripped firmly enough to drag the rest of the body along; it hangs as it likes.
             constexpr btScalar gripMass = 30.f;
             mTaskScheduler->holdObject(part, false, gripMass);
@@ -1328,15 +1362,37 @@ namespace MWPhysics
         mActorsPositions.clear();
         if (!mActors.empty())
             mActorsPositions.reserve(mActors.size() - 1);
+        std::vector<std::pair<MWWorld::Ptr, osg::Vec3f>> bodyPositions;
+        const float interpolation = std::clamp(mTimeAccum / mPhysicsDt, 0.f, 1.f);
         for (const auto& [ptr, physicActor] : mActors)
         {
             if (physicActor.get() == player)
                 continue;
+            if (const auto ragdoll = mRagdolls.find(ptr); ragdoll != mRagdolls.end())
+            {
+                // A body in one piece carries the actor along (so it is there after loading, too); a limp one
+                // leaves it where it died, only its bones move.
+                const auto poses = ragdoll->second->getBonePoses(interpolation);
+                if (poses.size() == 1 && poses.front().first.empty())
+                {
+                    osg::Vec3f translation;
+                    osg::Quat rotation;
+                    osg::Vec3f scale;
+                    osg::Quat scaleOrientation;
+                    poses.front().second.decompose(translation, rotation, scale, scaleOrientation);
+                    if (SceneUtil::PositionAttitudeTransform* base = physicActor->getPtr().getRefData().getBaseNode())
+                        base->setAttitude(rotation);
+                    bodyPositions.emplace_back(physicActor->getPtr(), translation);
+                }
+                continue;
+            }
             mActorsPositions.emplace_back(physicActor->getPtr(), physicActor->getSimulationPosition());
         }
 
         for (const auto& [ptr, pos] : mActorsPositions)
             world->moveObject(ptr, pos, false, false);
+        for (const auto& [ptr, pos] : bodyPositions)
+            world->moveObject(ptr, pos, true, false);
 
         if (player != nullptr)
             world->moveObject(player->getPtr(), player->getSimulationPosition(), false, false);

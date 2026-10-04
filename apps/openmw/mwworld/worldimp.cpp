@@ -90,6 +90,7 @@
 #include "../mwphysics/collisiontype.hpp"
 #include "../mwphysics/object.hpp"
 #include "../mwphysics/physicssystem.hpp"
+#include "../mwphysics/ragdoll.hpp"
 
 #include "../mwsound/constants.hpp"
 
@@ -1379,13 +1380,47 @@ namespace MWWorld
 
     bool World::canGrabObject(const MWWorld::ConstPtr& ptr) const
     {
-        return !ptr.isEmpty() && mPhysics->canHoldObject(ptr);
+        return !ptr.isEmpty() && (mPhysics->canHoldObject(ptr) || canRagdollCorpse(ptr));
+    }
+
+    bool World::canRagdollCorpse(const MWWorld::ConstPtr& ptr) const
+    {
+        // Not the player (the death camera).
+        if (!ptr.getClass().isActor() || ptr == getPlayerConstPtr())
+            return false;
+        // Only reads the stats, so stripping Const is fine.
+        const MWWorld::Ptr mutablePtr(
+            const_cast<MWWorld::LiveCellRefBase*>(ptr.mRef), const_cast<MWWorld::CellStore*>(ptr.mCell));
+        const MWMechanics::CreatureStats& stats = ptr.getClass().getCreatureStats(mutablePtr);
+        return stats.isDead() && stats.isDeathAnimationFinished();
     }
 
     bool World::grabObject(const MWWorld::Ptr& ptr)
     {
         if (ptr.isEmpty())
             return false;
+        // Bodies only go limp as they die, so one from before a save (or placed dead) lies in its death pose
+        // until picked up.
+        if (canRagdollCorpse(ptr) && getRagdollBonePoses(ptr).empty())
+        {
+            const MWRender::Animation* animation = mRendering->getAnimation(ptr);
+            if (animation == nullptr)
+                return false;
+            // With the standard (people's) skeleton, limp; otherwise in one piece.
+            std::map<std::string, osg::Matrixf, std::less<>> bones;
+            for (const std::string& bone : MWPhysics::Ragdoll::getRequiredBones())
+            {
+                const std::optional<osg::Matrixf> world = animation->getBoneWorldMatrix(bone);
+                if (!world)
+                    break;
+                bones.emplace(bone, *world);
+            }
+            const bool made = bones.size() == MWPhysics::Ragdoll::getRequiredBones().size()
+                ? createRagdoll(ptr, bones, osg::Vec3f())
+                : createCorpseBody(ptr);
+            if (!made)
+                return false;
+        }
         const MWRender::Camera* camera = mRendering->getCamera();
         return mPhysics->holdObject(ptr, camera->getPosition(), camera->getOrient() * osg::Vec3f(0, 1, 0));
     }
@@ -1415,6 +1450,11 @@ namespace MWWorld
     std::vector<std::pair<std::string, osg::Matrixf>> World::getRagdollBonePoses(const MWWorld::ConstPtr& actor) const
     {
         return mPhysics->getRagdollBonePoses(actor);
+    }
+
+    bool World::createCorpseBody(const MWWorld::Ptr& actor)
+    {
+        return mPhysics->createCorpseBody(actor);
     }
 
     void World::removeRagdoll(const MWWorld::ConstPtr& actor)

@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string_view>
 
+#include <BulletCollision/CollisionShapes/btBoxShape.h>
 #include <BulletCollision/CollisionShapes/btCapsuleShape.h>
 #include <BulletDynamics/ConstraintSolver/btConeTwistConstraint.h>
 #include <BulletDynamics/Dynamics/btRigidBody.h>
@@ -75,6 +76,7 @@ namespace MWPhysics
         }
         btTransform mBoneFromBody; // the bone's transform in the body's frame (without scale)
         osg::Vec3f mBoneScale;
+        osg::Vec3f mBoxHalfExtents; // for a single box body
     };
 
     namespace
@@ -222,6 +224,49 @@ namespace MWPhysics
             mTaskScheduler->addConstraint(joint.get());
             mJoints.push_back(std::move(joint));
         }
+    }
+
+    Ragdoll::Ragdoll(const MWWorld::Ptr& actor, const btTransform& bodyWorld, const osg::Vec3f& halfExtents,
+        float mass, const osg::Matrixf& baseWorld, PhysicsTaskScheduler* scheduler)
+        : mTaskScheduler(scheduler)
+    {
+        auto part = std::make_shared<Part>(actor);
+        part->mBoxHalfExtents = halfExtents;
+        part->mShape = std::make_unique<btBoxShape>(Misc::Convert::toBullet(halfExtents));
+        part->mBoneFromBody = bodyWorld.inverse() * withoutScale(baseWorld, part->mBoneScale);
+
+        btVector3 inertia(0, 0, 0);
+        part->mShape->calculateLocalInertia(mass, inertia);
+        part->mMotionState = std::make_unique<RagdollMotionState>(bodyWorld);
+        btRigidBody::btRigidBodyConstructionInfo info(mass, part->mMotionState.get(), part->mShape.get(), inertia);
+        info.m_friction = 0.8f;
+        info.m_restitution = 0.05f;
+        info.m_linearDamping = 0.15f;
+        info.m_angularDamping = 0.7f;
+        info.m_linearSleepingThreshold = 4.f;
+        info.m_angularSleepingThreshold = 1.f;
+        auto body = std::make_unique<btRigidBody>(info);
+        body->setUserPointer(part.get());
+        part->setBody(std::move(body));
+        mTaskScheduler->addRigidBody(part->mBody, CollisionType_Dynamic,
+            CollisionType_DynamicSupport | CollisionType_Actor | CollisionType_Dynamic | CollisionType_Projectile);
+        mParts.push_back(std::move(part));
+    }
+
+    std::optional<osg::Vec3f> Ragdoll::getGrabPoint(const osg::Vec3f& eye) const
+    {
+        if (mParts.size() != 1)
+            return std::nullopt;
+        const Part& part = *mParts.front();
+        btTransform bodyWorld;
+        part.mMotionState->getWorldTransform(bodyWorld);
+        // The nearest point of the box, a little inside so the pin isn't right on the edge.
+        btVector3 local = bodyWorld.inverse() * Misc::Convert::toBullet(eye);
+        const osg::Vec3f& half = part.mBoxHalfExtents;
+        local.setX(std::clamp<btScalar>(local.x(), -half.x() * 0.8f, half.x() * 0.8f));
+        local.setY(std::clamp<btScalar>(local.y(), -half.y() * 0.8f, half.y() * 0.8f));
+        local.setZ(std::clamp<btScalar>(local.z(), -half.z() * 0.8f, half.z() * 0.8f));
+        return Misc::Convert::toOsg(bodyWorld * local);
     }
 
     Ragdoll::~Ragdoll()

@@ -3,6 +3,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,6 +39,10 @@ namespace MWPhysics
         /// @param kick velocity change of the upper body from the blow that killed it
         Ragdoll(const MWWorld::Ptr& actor, const BoneMatrices& bones, const osg::Vec3f& velocity,
             const osg::Vec3f& kick, PhysicsTaskScheduler* scheduler);
+        /// A body without the standard skeleton, as one box: bodyWorld/halfExtents place it, baseWorld is where the
+        /// actor's model is, which then follows it (its pose is the only one, unnamed).
+        Ragdoll(const MWWorld::Ptr& actor, const btTransform& bodyWorld, const osg::Vec3f& halfExtents, float mass,
+            const osg::Matrixf& baseWorld, PhysicsTaskScheduler* scheduler);
         ~Ragdoll();
 
         /// Where the simulated bones are now (world matrices), parents first. Interpolation is how far the time
@@ -48,6 +53,9 @@ namespace MWPhysics
 
         /// The part closest to a view ray from eye along direction (normalized), for grabbing.
         std::shared_ptr<PtrHolder> findPart(const osg::Vec3f& eye, const osg::Vec3f& direction) const;
+
+        /// For a single body: the point on it nearest to eye, where it is grabbed. Otherwise none.
+        std::optional<osg::Vec3f> getGrabPoint(const osg::Vec3f& eye) const;
 
     private:
         struct Part;

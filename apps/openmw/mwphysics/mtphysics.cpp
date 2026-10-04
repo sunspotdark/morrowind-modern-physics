@@ -12,6 +12,7 @@
 #include <BulletCollision/BroadphaseCollision/btDbvtBroadphase.h>
 #include <BulletCollision/CollisionDispatch/btCollisionObjectWrapper.h>
 #include <BulletCollision/CollisionShapes/btCollisionShape.h>
+#include <BulletDynamics/ConstraintSolver/btPoint2PointConstraint.h>
 #include <BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h>
 #include <BulletDynamics/Dynamics/btRigidBody.h>
 #include <LinearMath/btThreads.h>
@@ -829,6 +830,9 @@ namespace MWPhysics
         mCollisionObjects.erase(collisionObject);
         if (btRigidBody::upcast(collisionObject) != nullptr)
             --mNumRigidBodies;
+        // A body going while held mustn't leave the pin holding it in the world.
+        if (mHoldPin != nullptr && &mHoldPin->getRigidBodyA() == collisionObject)
+            removeHoldPinUnsafe();
         mCollisionWorld->removeCollisionObject(collisionObject);
     }
 
@@ -1134,7 +1138,27 @@ namespace MWPhysics
 
         updateWedgedObjects(wedged);
 
-        if (held != nullptr && btRigidBody::upcast(held->getCollisionObject()) != nullptr)
+        if (held != nullptr && mHoldPin != nullptr)
+        {
+            // Move the pin towards the target at no more than a run; the body swings along behind it.
+            const btVector3 bodyPoint = mHoldPin->getRigidBodyA().getCenterOfMassTransform() * mHoldPin->getPivotInA();
+            constexpr btScalar maxHoldDistance = 200.f;
+            if ((holdTarget - bodyPoint).length2() > maxHoldDistance * maxHoldDistance)
+            {
+                releaseHeldObjectUnsafe(mHoldPin->getRigidBodyA(), std::nullopt);
+                std::lock_guard heldLock(mHeldObjectMutex);
+                mHeldObject.reset();
+            }
+            else
+            {
+                btVector3 step = holdTarget - mHoldPin->getPivotInB();
+                const btScalar maxStep = 600.f * mPhysicsDt;
+                if (step.length2() > maxStep * maxStep)
+                    step *= maxStep / step.length();
+                mHoldPin->setPivotB(mHoldPin->getPivotInB() + step);
+            }
+        }
+        else if (held != nullptr && btRigidBody::upcast(held->getCollisionObject()) != nullptr)
         {
             btRigidBody& body = *btRigidBody::upcast(held->getCollisionObject());
             const btVector3 offset = holdTarget - body.getCenterOfMassPosition();
@@ -1318,7 +1342,8 @@ namespace MWPhysics
     }
 
     void PhysicsTaskScheduler::holdObject(
-        const std::shared_ptr<PtrHolder>& holder, bool steerRotation, btScalar holdMass)
+        const std::shared_ptr<PtrHolder>& holder, bool steerRotation, btScalar holdMass,
+        const std::optional<btVector3>& grabPoint)
     {
         releaseHeldObject(std::nullopt);
 
@@ -1333,10 +1358,21 @@ namespace MWPhysics
         if (object != nullptr)
             setStuckUnsafe(*object, false);
         body.setActivationState(DISABLE_DEACTIVATION);
-        body.setGravity(btVector3(0, 0, 0));
         if (object != nullptr)
             freeWedgedObjectUnsafe(object);
         mHeldRestoreMass = 0; // left over if the last held thing was destroyed while held
+        removeHoldPinUnsafe();
+        if (grabPoint)
+        {
+            // Hanging from the grab point, under its own weight.
+            mHoldPin = std::make_unique<btPoint2PointConstraint>(
+                body, body.getCenterOfMassTransform().inverse() * *grabPoint);
+            mHoldPin->m_setting.m_impulseClamp = static_cast<btScalar>(15.0 / body.getInvMass());
+            mHoldPin->m_setting.m_tau = 0.1f;
+            mDynamicsWorld->addConstraint(mHoldPin.get(), true);
+        }
+        else
+            body.setGravity(btVector3(0, 0, 0));
         if (holdMass > 0 && body.getInvMass() > 0)
         {
             mHeldRestoreMass = 1 / body.getInvMass();
@@ -1349,7 +1385,7 @@ namespace MWPhysics
         std::lock_guard heldLock(mHeldObjectMutex);
         mHeldObject = holder;
         mHoldSteerRotation = steerRotation;
-        mHoldTarget = body.getCenterOfMassPosition();
+        mHoldTarget = grabPoint ? *grabPoint : body.getCenterOfMassPosition();
         mHoldTargetRotation = body.getOrientation();
     }
 
@@ -1374,8 +1410,17 @@ namespace MWPhysics
         mHeldObject.reset();
     }
 
+    void PhysicsTaskScheduler::removeHoldPinUnsafe()
+    {
+        if (mHoldPin == nullptr)
+            return;
+        mDynamicsWorld->removeConstraint(mHoldPin.get());
+        mHoldPin.reset();
+    }
+
     void PhysicsTaskScheduler::releaseHeldObjectUnsafe(btRigidBody& body, const std::optional<btVector3>& velocity)
     {
+        removeHoldPinUnsafe();
         if (mHeldRestoreMass > 0)
         {
             btVector3 inertia(0, 0, 0);

@@ -2457,7 +2457,7 @@ namespace MWMechanics
         }
         else if (cls.getCreatureStats(mPtr).isDead())
         {
-            if (mRagdoll)
+            if (mRagdoll || mAnimation != nullptr)
                 driveRagdoll();
 
             // initial start of death animation for actors that started the game as dead
@@ -2868,8 +2868,9 @@ namespace MWMechanics
 
     bool CharacterController::startRagdoll()
     {
-        // People only for now: they all share the standard skeleton. Not the player (the death camera).
-        if (!mAnimation || mPtr == getPlayer() || !mPtr.getClass().isNpc())
+        // Anyone with the standard (people's) skeleton, e.g. skeletons and dremora too; the rest play their death
+        // animation. Not the player (the death camera).
+        if (!mAnimation || mPtr == getPlayer())
             return false;
         std::map<std::string, osg::Matrixf, std::less<>> bones;
         for (const std::string& bone : MWPhysics::Ragdoll::getRequiredBones())
@@ -2898,9 +2899,17 @@ namespace MWMechanics
             mRagdoll = false;
             return;
         }
+        if (!mRagdoll)
+        {
+            // Made since it died (picking up a body from before a save): it takes over from the death pose.
+            mRagdoll = true;
+            mAnimation->stopAllAnimations();
+        }
         // Parents first, so each bone is placed relative to where its parent now is.
+        // (A body in one piece, unnamed, moves the actor itself; see PhysicsSystem::moveActors.)
         for (const auto& [bone, world] : poses)
-            mAnimation->setBoneWorldMatrix(bone, world);
+            if (!bone.empty())
+                mAnimation->setBoneWorldMatrix(bone, world);
     }
 
     void CharacterController::updateContinuousVfx() const
