@@ -903,8 +903,9 @@ namespace MWMechanics
             resetCurrentHitState();
             resetCurrentIdleState();
             resetCurrentJumpState();
+            // With no death animation playing, kill() reports it finished on the next update, so the death is
+            // still recorded and the corpse stops blocking the living (see Actors::killDeadActors).
             mAnimation->stopAllAnimations();
-            stats.setDeathAnimationFinished(true);
             return;
         }
 
