@@ -566,6 +566,11 @@ namespace MWPhysics
             mTaskScheduler->setAtRest(part->mBody);
     }
 
+    std::vector<std::shared_ptr<PtrHolder>> Ragdoll::getParts() const
+    {
+        return { mParts.begin(), mParts.end() };
+    }
+
     float Ragdoll::getMass() const
     {
         float mass = 0;

@@ -90,6 +90,8 @@ namespace MWPhysics
 
         float getMass() const;
 
+        std::vector<std::shared_ptr<PtrHolder>> getParts() const;
+
         /// Still and asleep, as if it had been lying there (until something disturbs it).
         void setAtRest();
 

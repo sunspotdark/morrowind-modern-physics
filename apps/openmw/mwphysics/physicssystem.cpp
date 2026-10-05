@@ -906,11 +906,21 @@ namespace MWPhysics
                 mTaskScheduler->holdObject(part, false, 0, Misc::Convert::toBullet(*grabPoint));
                 return true;
             }
-            // Gripped firmly enough to drag the rest of the body along (a heavy beast takes a heavier grip); it
-            // hangs as it likes. A loose piece is just carried.
-            const btScalar gripMass
-                = ragdoll->second->isJointed() ? std::clamp(ragdoll->second->getMass() * 0.6f, 30.f, 300.f) : 0.f;
-            mTaskScheduler->holdObject(part, false, gripMass);
+            // A loose piece is just carried.
+            if (!ragdoll->second->isJointed())
+            {
+                mTaskScheduler->holdObject(part, false, 0);
+                return true;
+            }
+            // A body is a dead weight on the ground, but while dragged it weighs no more than a sack, so even a
+            // heavy beast follows without holding the carrier back. It's gripped firmly enough to drag the rest
+            // along, and hangs as it likes.
+            constexpr float draggedMass = 20.f;
+            mTaskScheduler->releaseHeldObject(std::nullopt); // so its full weight is back
+            const float mass = ragdoll->second->getMass();
+            const float lightenScale = mass > draggedMass ? draggedMass / mass : 1.f;
+            const btScalar gripMass = std::clamp(mass * lightenScale * 0.6f, 30.f, 300.f);
+            mTaskScheduler->holdObject(part, false, gripMass, std::nullopt, ragdoll->second->getParts(), lightenScale);
             return true;
         }
 

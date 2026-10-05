@@ -87,8 +87,10 @@ namespace MWPhysics
         /// grip drags what it is jointed to, e.g. the rest of a ragdoll).
         /// grabPoint: if set, it isn't carried but hangs from this world point (pinned there), which then follows
         /// the hold target.
+        /// lightened: other objects (the rest of a ragdoll) whose mass is scaled by lightenScale while it's held.
         void holdObject(const std::shared_ptr<PtrHolder>& object, bool steerRotation, btScalar holdMass,
-            const std::optional<btVector3>& grabPoint = std::nullopt);
+            const std::optional<btVector3>& grabPoint = std::nullopt,
+            const std::vector<std::shared_ptr<PtrHolder>>& lightened = {}, btScalar lightenScale = 1);
         void setHoldTarget(const btVector3& position, const btQuaternion& rotation);
         /// Let go of the held object, optionally setting its velocity (for throwing).
         void releaseHeldObject(const std::optional<btVector3>& velocity);
@@ -181,6 +183,9 @@ namespace MWPhysics
         std::weak_ptr<PtrHolder> mHeldObject;
         bool mHoldSteerRotation = true;
         btScalar mHeldRestoreMass = 0; // the mass to give back on release, if changed while held
+        // Objects lightened while something is held, and the masses to give back (see holdObject).
+        std::vector<std::pair<std::weak_ptr<PtrHolder>, btScalar>> mLightened;
+        void restoreLightenedUnsafe();
         std::unique_ptr<btPoint2PointConstraint> mHoldPin; // see holdObject
         void removeHoldPinUnsafe();
         btVector3 mHoldTarget;

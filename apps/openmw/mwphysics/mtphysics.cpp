@@ -1368,7 +1368,8 @@ namespace MWPhysics
 
     void PhysicsTaskScheduler::holdObject(
         const std::shared_ptr<PtrHolder>& holder, bool steerRotation, btScalar holdMass,
-        const std::optional<btVector3>& grabPoint)
+        const std::optional<btVector3>& grabPoint, const std::vector<std::shared_ptr<PtrHolder>>& lightened,
+        btScalar lightenScale)
     {
         releaseHeldObject(std::nullopt);
 
@@ -1386,6 +1387,7 @@ namespace MWPhysics
         if (object != nullptr)
             freeWedgedObjectUnsafe(object);
         mHeldRestoreMass = 0; // left over if the last held thing was destroyed while held
+        restoreLightenedUnsafe();
         removeHoldPinUnsafe();
         if (grabPoint)
         {
@@ -1405,6 +1407,18 @@ namespace MWPhysics
             body.getCollisionShape()->calculateLocalInertia(holdMass, inertia);
             body.setMassProps(holdMass, inertia);
             body.updateInertiaTensor();
+        }
+        for (const std::shared_ptr<PtrHolder>& other : lightened)
+        {
+            btRigidBody* const otherBody = btRigidBody::upcast(other->getCollisionObject());
+            if (other == holder || otherBody == nullptr || otherBody->getInvMass() <= 0 || lightenScale >= 1)
+                continue;
+            const btScalar mass = 1 / otherBody->getInvMass();
+            mLightened.emplace_back(other, mass);
+            btVector3 inertia(0, 0, 0);
+            otherBody->getCollisionShape()->calculateLocalInertia(mass * lightenScale, inertia);
+            otherBody->setMassProps(mass * lightenScale, inertia);
+            otherBody->updateInertiaTensor();
         }
 
         std::lock_guard heldLock(mHeldObjectMutex);
@@ -1435,6 +1449,22 @@ namespace MWPhysics
         mHeldObject.reset();
     }
 
+    void PhysicsTaskScheduler::restoreLightenedUnsafe()
+    {
+        for (const auto& [object, mass] : mLightened)
+        {
+            const std::shared_ptr<PtrHolder> locked = object.lock();
+            btRigidBody* const body = locked != nullptr ? btRigidBody::upcast(locked->getCollisionObject()) : nullptr;
+            if (body == nullptr)
+                continue;
+            btVector3 inertia(0, 0, 0);
+            body->getCollisionShape()->calculateLocalInertia(mass, inertia);
+            body->setMassProps(mass, inertia);
+            body->updateInertiaTensor();
+        }
+        mLightened.clear();
+    }
+
     void PhysicsTaskScheduler::removeHoldPinUnsafe()
     {
         if (mHoldPin == nullptr)
@@ -1454,6 +1484,7 @@ namespace MWPhysics
             body.updateInertiaTensor();
             mHeldRestoreMass = 0;
         }
+        restoreLightenedUnsafe();
         body.forceActivationState(ACTIVE_TAG);
         body.setDeactivationTime(0);
         body.setGravity(mDynamicsWorld->getGravity());
