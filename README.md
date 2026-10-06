@@ -1,5 +1,5 @@
-OpenMW - Modern Physics Fork (Unofficial)
-=========================================
+Morrowind - Modern Physics (Unofficial OpenMW Fork)
+===================================================
 
 Hi, sunspotdark here. Below the line is a detailed AI generated summary of the actual changes and such, but I felt compelled to add a personal note here at the top written with my actual human hands. 
 

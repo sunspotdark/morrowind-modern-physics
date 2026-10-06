@@ -90,7 +90,8 @@ Launcher::MainDialog::MainDialog(const Files::ConfigurationManager& configuratio
     logo->setPixmap(QIcon(":/images/openmw-header.png").pixmap(QSize(294, 64)));
     brandingLayout->addWidget(logo);
 
-    QLabel* forkLabel = new QLabel(tr("Modern Physics Fork v%1 (Unofficial) by sunspotdark").arg(forkVersion), branding);
+    QLabel* forkLabel
+        = new QLabel(tr("Morrowind - Modern Physics v%1 (Unofficial) by sunspotdark").arg(forkVersion), branding);
     forkLabel->setAlignment(Qt::AlignRight);
     QFont forkFont = forkLabel->font();
     forkFont.setItalic(true);
