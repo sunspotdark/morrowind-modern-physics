@@ -9,6 +9,8 @@ I am not a programmer. At all. This MF is vibecoded to hell and back, specifical
 
 I am led to believe by Claude that this probably works with old OpenMW saves, but new saves made within this fork will not be backwards compatible with OG OpenMW due to some funkiness with how the ragdoll physics are calculated, or some such. I have no idea if the slop machine is lying or not about this (see previous comment re: this being a vibecoded monstrosity made by a dribbling moron) so use at your own risk. I expect this probably works with most OpenMW mods that don't mess with the physics systems, but I cannot guarantee anything. The slop machine assures me that the ragdoll mechanics should apply to enemies added by mods, and there should be a failsafe if they don't. But, again, I have no idea if this is true--I cannot stress enough that I am exactly the sort of contemptible idiot who uses a $20 a month AI subscription to give themself delusions of game dev grandeur. But to my eyes, this works pretty much exactly as described. Crazy times we live in.
 
+Currently the physics interactions have no sound, which I will endeavor to add in future updates.
+
 I have no affiliation with the OpenMW team or Bethesda, but I am, of course, deeply indebted to them.
 
 Enjoy(?)
