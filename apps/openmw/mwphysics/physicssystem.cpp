@@ -698,8 +698,7 @@ namespace MWPhysics
                 return false;
         // Falling as it was moving.
         const osg::Vec3f velocity = getDeathVelocity(actor);
-        mRagdolls.erase(actor.mRef);
-        mRagdolls.emplace(actor.mRef, std::make_unique<Ragdoll>(actor, bones, velocity, kick, mTaskScheduler.get()));
+        addRagdoll(actor, std::make_unique<Ragdoll>(actor, bones, velocity, kick, mTaskScheduler.get()));
         return true;
     }
 
@@ -710,8 +709,7 @@ namespace MWPhysics
         std::unique_ptr<Ragdoll> ragdoll = Ragdoll::fromSkeleton(actor, bones, velocity, kick, mTaskScheduler.get());
         if (ragdoll == nullptr)
             return false;
-        mRagdolls.erase(actor.mRef);
-        mRagdolls.emplace(actor.mRef, std::move(ragdoll));
+        addRagdoll(actor, std::move(ragdoll));
         return true;
     }
 
@@ -753,8 +751,7 @@ namespace MWPhysics
             = Ragdoll::fromRigidPieces(actor, pieces, getDeathVelocity(actor), kick, mTaskScheduler.get());
         if (ragdoll == nullptr)
             return false;
-        mRagdolls.erase(actor.mRef);
-        mRagdolls.emplace(actor.mRef, std::move(ragdoll));
+        addRagdoll(actor, std::move(ragdoll));
         return true;
     }
 
@@ -792,10 +789,15 @@ namespace MWPhysics
         const float mass = std::clamp(volume * 500.f, 3.f, 400.f);
         const osg::Matrixf baseWorld = osg::Matrixf::scale(base->getScale())
             * osg::Matrixf::rotate(base->getAttitude()) * osg::Matrixf::translate(base->getPosition());
-        mRagdolls.erase(actor.mRef);
-        mRagdolls.emplace(
-            actor.mRef, std::make_unique<Ragdoll>(actor, bodyWorld, half, mass, baseWorld, mTaskScheduler.get()));
+        addRagdoll(actor, std::make_unique<Ragdoll>(actor, bodyWorld, half, mass, baseWorld, mTaskScheduler.get()));
         return true;
+    }
+
+    void PhysicsSystem::addRagdoll(const MWWorld::Ptr& actor, std::unique_ptr<Ragdoll> ragdoll)
+    {
+        ragdoll->setStartPosition(actor.getRefData().getPosition().asVec3());
+        mRagdolls.erase(actor.mRef);
+        mRagdolls.emplace(actor.mRef, std::move(ragdoll));
     }
 
     std::vector<std::pair<std::string, osg::Matrixf>> PhysicsSystem::getRagdollBonePoses(
@@ -1438,6 +1440,7 @@ namespace MWPhysics
         if (!mActors.empty())
             mActorsPositions.reserve(mActors.size() - 1);
         std::vector<std::pair<MWWorld::Ptr, osg::Vec3f>> bodyPositions;
+        std::vector<const MWWorld::LiveCellRefBase*> droppedBodies;
         for (const auto& [ptr, physicActor] : mActors)
         {
             if (physicActor.get() == player)
@@ -1448,6 +1451,38 @@ namespace MWPhysics
                 // As its model was posed this frame (see getRagdollBonePoses).
                 const auto& poses = ragdoll->second->getLastBonePoses();
                 const MWWorld::Ptr actorPtr = physicActor->getPtr();
+
+                if (!poses.empty())
+                {
+                    const osg::Vec3f bodyPosition = poses.front().second.getTrans();
+
+                    // The actor is kept with its body, so if it is well away from it, something else moved it (a
+                    // script, say). It stays there, in its death pose: the ragdoll would pull it back.
+                    constexpr float maxDistance = 256.f;
+                    if ((bodyPosition - actorPtr.getRefData().getPosition().asVec3()).length2()
+                        > maxDistance * maxDistance)
+                    {
+                        droppedBodies.push_back(ptr);
+                        continue;
+                    }
+
+                    // Safety net: a body that slipped through the ground would fall forever, taking what it
+                    // carries with it. It goes back to where it died, in its death pose (without the ragdoll).
+                    const MWWorld::CellStore* cell = actorPtr.getCell();
+                    const bool fallen = cell->isExterior()
+                        ? bodyPosition.z()
+                            < world->getTerrainHeightAt(bodyPosition, cell->getCell()->getWorldSpace()) - 100.f
+                        : bodyPosition.z() < ragdoll->second->getStartPosition().z() - 3000.f;
+                    if (fallen)
+                    {
+                        Log(Debug::Warning) << "Body of " << actorPtr.getCellRef().getRefId()
+                                            << " fell through the ground; put it back";
+                        droppedBodies.push_back(ptr);
+                        bodyPositions.emplace_back(actorPtr, ragdoll->second->getStartPosition());
+                        continue;
+                    }
+                }
+
                 if (poses.size() == 1 && poses.front().first.empty())
                 {
                     // In one piece: the whole model is the body.
@@ -1471,6 +1506,9 @@ namespace MWPhysics
             }
             mActorsPositions.emplace_back(physicActor->getPtr(), physicActor->getSimulationPosition());
         }
+
+        for (const MWWorld::LiveCellRefBase* dropped : droppedBodies)
+            mRagdolls.erase(dropped);
 
         for (const auto& [ptr, pos] : mActorsPositions)
             world->moveObject(ptr, pos, false, false);

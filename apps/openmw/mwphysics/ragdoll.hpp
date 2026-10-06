@@ -107,6 +107,10 @@ namespace MWPhysics
 
         MWWorld::Ptr getPtr() const;
 
+        /// Where the actor was when the body went limp (somewhere safe to put it back).
+        void setStartPosition(const osg::Vec3f& position) { mStartPosition = position; }
+        const osg::Vec3f& getStartPosition() const { return mStartPosition; }
+
         /// What getBonePoses gave last (so the rest of the frame agrees with what the bones were set to).
         const std::vector<std::pair<std::string, osg::Matrixf>>& getLastBonePoses() const { return mLastPoses; }
 
@@ -130,6 +134,7 @@ namespace MWPhysics
         std::optional<osg::Vec2f> mActorOffset; // from the main part to the actor, along the ground
         // For hasComeApart: how long it has been checked, how far each part started from the main one, and where
         // each part was at the last check.
+        osg::Vec3f mStartPosition;
         float mAge = 0;
         float mCheckTimer = 0;
         std::vector<float> mStartDistances;
