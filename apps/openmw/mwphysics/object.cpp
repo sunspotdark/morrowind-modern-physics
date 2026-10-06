@@ -304,6 +304,13 @@ namespace MWPhysics
     {
         if (mMotionState == nullptr)
             return std::nullopt;
+        {
+            // Moved by the game since the last step (placed, stuck in a wall...): the simulation doesn't know yet,
+            // and what it has is out of date. That move stands.
+            std::unique_lock<std::mutex> lock(mPositionMutex);
+            if (mTransformUpdatePending)
+                return std::nullopt;
+        }
         const std::optional<btTransform> centerOfMass = mMotionState->take(interpolation);
         if (!centerOfMass)
             return std::nullopt;
