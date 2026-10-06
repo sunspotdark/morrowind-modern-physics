@@ -1066,6 +1066,7 @@ namespace MWRender
             return result;
         const osgUtil::LineSegmentIntersector::Intersection& intersection = intersector->getFirstIntersection();
         result.mHit = true;
+        result.mPosition = intersection.getWorldIntersectPoint();
         for (const osg::Node* node : intersection.nodePath)
             if (node->getNodeMask() & Mask_Terrain)
                 result.mTerrain = true;

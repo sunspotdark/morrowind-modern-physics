@@ -11,6 +11,8 @@
 #include <osg/Switch>
 
 #include <osg/Vec4f>
+#include <osgUtil/IntersectionVisitor>
+#include <osgUtil/LineSegmentIntersector>
 #include <osgParticle/ParticleProcessor>
 #include <osgParticle/ParticleSystem>
 
@@ -1282,21 +1284,52 @@ namespace MWRender
     void Animation::attachStuckProjectile(
         VFS::Path::NormalizedView model, const osg::Vec3f& hitPosition, const osg::Vec3f& direction)
     {
-        // The hit was on the actor's collision box, which is bigger than the body. Find the bone closest to
-        // the line the projectile was flying along, inside the box, and stick it in there.
+        // The hit was on the actor's collision box, which is bigger than the body. Where the projectile's path
+        // meets what is seen of the body (armor and clothes included, other stuck projectiles not), the tip goes
+        // in a little way.
         constexpr float searchDepth = 80.f;
+        constexpr float embed = 4.f;
+        std::optional<osg::Vec3f> surface;
+        if (mInsert != nullptr)
+        {
+            osg::ref_ptr<osgUtil::LineSegmentIntersector> intersector = new osgUtil::LineSegmentIntersector(
+                osgUtil::Intersector::MODEL, hitPosition - direction * 10.f, hitPosition + direction * searchDepth);
+            intersector->setIntersectionLimit(osgUtil::LineSegmentIntersector::LIMIT_NEAREST);
+            osgUtil::IntersectionVisitor visitor(intersector);
+            visitor.setTraversalMask(~static_cast<unsigned int>(Mask_Effect));
+            mInsert->accept(visitor);
+            if (intersector->containsIntersections())
+                surface = intersector->getFirstIntersection().getWorldIntersectPoint();
+        }
+
+        // Stuck to the bone it goes into: the closest to the tip. Without a surface to go by, the bone closest to
+        // the line it was flying along, inside the box, and the tip there. Only bones that move part of the body:
+        // not the root, which carries the walk and so wanders off from the body (or for a body of rigid pieces,
+        // which has no such bones, any node but that).
+        std::set<std::string> bodyBones;
+        for (const SkinnedBone& skinned : getSkinnedBones())
+            bodyBones.insert(skinned.mName);
+        std::set<const osg::Node*> aboveBody;
+        for (const osg::Node* up = mAccumRoot.get(); up != nullptr && up != mInsert.get();
+             up = up->getNumParents() > 0 ? up->getParent(0) : nullptr)
+            aboveBody.insert(up);
+
         osg::MatrixTransform* bone = nullptr;
         osg::Matrixf boneToWorld;
         osg::Vec3f tipPosition;
         float closest = std::numeric_limits<float>::max();
         for (const auto& [name, node] : getNodeMap())
         {
+            if (bodyBones.empty() ? aboveBody.count(node.get()) != 0
+                                  : bodyBones.count(Misc::StringUtils::lowerCase(name)) == 0)
+                continue;
             const osg::NodePathList paths = node->getParentalNodePaths();
             if (paths.empty())
                 continue;
             const osg::Matrixf toWorld = osg::computeLocalToWorld(paths.front());
             const osg::Vec3f bonePosition = toWorld.getTrans();
-            const float along = std::clamp((bonePosition - hitPosition) * direction, 0.f, searchDepth);
+            const float along = surface ? (*surface - hitPosition) * direction + embed
+                                        : std::clamp((bonePosition - hitPosition) * direction, 0.f, searchDepth);
             const osg::Vec3f onLine = hitPosition + direction * along;
             const float distance = (bonePosition - onLine).length2();
             if (distance < closest)
@@ -1323,12 +1356,13 @@ namespace MWRender
         const osg::Vec3f up = right ^ direction;
         const osg::Matrixf rotation(right.x(), right.y(), right.z(), 0.f, direction.x(), direction.y(),
             direction.z(), 0.f, up.x(), up.y(), up.z(), 0.f, 0.f, 0.f, 0.f, 1.f);
-        constexpr float embed = 3.f;
-        const osg::Vec3f origin = tipPosition + direction * embed - direction * tip;
+        const osg::Vec3f origin = tipPosition - direction * tip;
         const osg::Matrixf projectileToWorld = rotation * osg::Matrixf::translate(origin);
 
         osg::ref_ptr<osg::MatrixTransform> attached = new osg::MatrixTransform(
             projectileToWorld * osg::Matrixf::inverse(boneToWorld));
+        // Not part of the body (for where the next one goes in; see above), though it shows.
+        attached->setNodeMask(Mask_Effect);
         attached->addChild(projectile);
         bone->addChild(attached);
         mStuckProjectiles.emplace_back(bone, attached);

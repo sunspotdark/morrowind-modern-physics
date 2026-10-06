@@ -636,6 +636,7 @@ namespace MWWorld
                 // Fixed things made of something soft enough (wood, plants, earth) catch it. It glances off stone
                 // and metal, and off loose items, doors and water.
                 bool stick = false;
+                osg::Vec3f stickPoint = hitPosition;
                 const bool hitTerrain = target.isEmpty() && !projectile->getHitWater();
                 const bool hitStatic
                     = !target.isEmpty() && !target.getClass().isItem(target) && !target.getClass().isDoor();
@@ -643,15 +644,19 @@ namespace MWWorld
                 {
                     osg::Vec3f direction = projectileState.mVelocity;
                     direction.normalize();
+                    // The hit was on the collision shape, which can stand off from what is seen (often a little
+                    // bigger). Look along the flight for the visible surface, a little either side of it.
                     const MWRender::RenderingManager::SurfaceResult surface
-                        = mRendering->castRayForSurface(hitPosition - direction * 20.f, hitPosition + direction * 20.f);
+                        = mRendering->castRayForSurface(hitPosition - direction * 20.f, hitPosition + direction * 60.f);
                     const VFS::Path::Normalized model
                         = hitStatic ? target.getClass().getCorrectedModel(target) : VFS::Path::Normalized();
                     // Bare ground takes arrows unless it looks rocky; unrecognized objects deflect them.
                     stick = isSoftSurface(surface.mTexture, model.value(), hitTerrain || surface.mTerrain);
+                    if (surface.mHit)
+                        stickPoint = surface.mPosition;
                 }
-                placeMissedProjectile(
-                    projectileState, hitPosition, Misc::Convert::toOsg(projectile->getHitNormal()), stick);
+                placeMissedProjectile(projectileState, stick ? stickPoint : osg::Vec3f(hitPosition),
+                    Misc::Convert::toOsg(projectile->getHitNormal()), stick);
             }
 
             projectileState.mToDelete = true;

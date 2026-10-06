@@ -186,6 +186,7 @@ namespace MWRender
         {
             bool mHit = false;
             bool mTerrain = false;
+            osg::Vec3f mPosition; // where the visible surface was hit
             std::string mTexture; // file name of the base texture of what was hit, if any
         };
         /// What the first thing (other than actors) between origin and dest looks like.
